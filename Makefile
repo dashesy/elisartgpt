@@ -32,11 +32,21 @@ smoke: ## Generate one picture through codex end to end (uses your plan)
 VM := elisart
 VM_REPO := elisartgpt
 
+PUBLIC_URL := https://EXAMPLE.sslip.io
+# Restart the API on the VM and wait until it answers again (uvicorn takes a second).
+define vm_restart
+	ssh $(VM) 'cd $(VM_REPO) && sudo systemctl restart elisart@$$USER && for i in $$(seq 20); do curl -sf 127.0.0.1:8787/health >/dev/null && break; sleep 0.5; done'
+endef
+
 downloads-on: ## VM: expose the download page + APK
-	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=true/" .env && sudo systemctl restart elisart@$$USER' && curl -s -o /dev/null -w "download page: %{http_code}\n" https://EXAMPLE.sslip.io/
+	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=true/" .env'
+	$(vm_restart)
+	@curl -s -o /dev/null -w "download page: %{http_code} (200 = public)\n" $(PUBLIC_URL)/
 
 downloads-off: ## VM: hide the download page + APK (API keeps working)
-	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=false/" .env && sudo systemctl restart elisart@$$USER' && curl -s -o /dev/null -w "download page: %{http_code}\n" https://EXAMPLE.sslip.io/
+	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=false/" .env'
+	$(vm_restart)
+	@curl -s -o /dev/null -w "download page: %{http_code} (404 = hidden)\n" $(PUBLIC_URL)/
 
 vm-status: ## VM: service state and recent log lines
 	ssh $(VM) 'systemctl is-active elisart@$$USER caddy | paste -sd" "; journalctl -u elisart@$$USER -n 5 --no-pager -o cat'
