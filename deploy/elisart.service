@@ -1,0 +1,15 @@
+[Unit]
+Description=elisart server (Codex-backed art API)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=%i
+WorkingDirectory=/home/%i/elisartgpt/server
+EnvironmentFile=/home/%i/elisartgpt/.env
+ExecStart=/home/%i/.local/bin/mise exec -- uv run uvicorn elisart.main:app --host ${ELISART_HOST} --port ${ELISART_PORT}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

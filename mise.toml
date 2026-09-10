@@ -1,0 +1,15 @@
+# Pinned toolchain. `mise install` is the whole setup for a new machine.
+min_version = "2026.6.1"
+
+[tools]
+python = "3.13"
+uv = "0.12.13"
+lefthook = "2.1.12"
+# Android side: the Gradle wrapper pins Gradle itself; the JDK is the only
+# host dependency. The Android SDK is installed by `make android-sdk` (see
+# android/README.md) rather than pinned here.
+java = "temurin-21"
+ktlint = "1.8.0"
+
+[env]
+_.file = ".env"
