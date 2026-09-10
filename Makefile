@@ -1,9 +1,11 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke downloads-on downloads-off vm-status
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
 
 SERVER := server
 # Gradle needs a JDK; resolve mise's pin even from a shell without `mise activate`.
 export JAVA_HOME ?= $(shell mise where java 2>/dev/null)
+export ANDROID_HOME ?= $(HOME)/Library/Android/sdk
+ADB := $(ANDROID_HOME)/platform-tools/adb
 
 help: ## List tasks
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -68,3 +70,18 @@ publish: apk ## Build and upload the APK (+ version.json for the in-app update c
 	jq '{versionCode: .elements[0].versionCode, versionName: .elements[0].versionName, url: ""}' $$out/output-metadata.json > $$out/version.json; \
 	cat $$out/version.json; \
 	ssh elisart 'mkdir -p elisartgpt/data/app' && scp $$out/elisart.apk $$out/version.json elisart:elisartgpt/data/app/
+
+emu: ## Boot the headless Android emulator (AVD "elisart") and wait for Android
+	@$(ANDROID_HOME)/emulator/emulator -avd elisart -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >/tmp/elisart-emulator.log 2>&1 &
+	@until [ "$$($(ADB) -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done; echo "emulator up: $$($(ADB) -e shell getprop ro.build.version.release)"
+
+emu-gui: ## Boot the emulator WITH a window, to look at the app yourself
+	@$(ANDROID_HOME)/emulator/emulator -avd elisart -no-audio -no-boot-anim -no-snapshot >/tmp/elisart-emulator.log 2>&1 &
+	@until [ "$$($(ADB) -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done; echo "emulator up: $$($(ADB) -e shell getprop ro.build.version.release)"
+
+emu-install: apk ## Install the release APK on the emulator and launch it
+	$(ADB) -e install -r android/app/build/outputs/apk/release/elisart.apk
+	$(ADB) -e shell am start -n art.elisa/.MainActivity
+
+emu-stop: ## Shut the emulator down
+	-$(ADB) -e emu kill

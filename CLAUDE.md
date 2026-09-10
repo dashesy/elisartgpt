@@ -24,6 +24,27 @@ per drawing, so "make it blue" edits the same picture.
 - `make help` lists every task. Tests and lint run through the Makefile.
 - Comment the *why*, never the *what*.
 
+## Testing the app without a phone
+
+An Android emulator is set up on the Mac (SDK at `~/Library/Android/sdk`, AVD
+`elisart` = Pixel 7, Android 15, arm64). Drive it from the shell:
+
+```
+make emu            # boot headless (no window); ~20 s to Android
+make emu-gui        # same, with a window, for a human to look at
+make emu-install    # build + install the release APK and launch the app
+adb -e exec-out screencap -p > shot.png    # see the screen (Read the PNG)
+adb -e shell input tap X Y / input text 'a%sb' / input keyevent KEYCODE_BACK
+adb -e logcat -d -s AndroidRuntime:E        # crashes
+make emu-stop
+```
+
+Screen is 1080x2400. `input text` needs `%s` for spaces. A drawing takes
+30-90 s: screenshot again after `sleep 60`. Gotchas that cost time once:
+`avdmanager` only finds system images when it runs from a *copy* of
+`cmdline-tools` under the SDK root (not the Homebrew path, not a symlink), and
+Gradle/adb tooling needs `JAVA_HOME` (`mise where java`).
+
 ## Codex facts this code relies on
 
 - `codex exec --json` prints one JSON object per line: `thread.started`
