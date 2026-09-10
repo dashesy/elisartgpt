@@ -2,6 +2,8 @@
 .PHONY: help setup dev test lint fmt smoke apk publish code codes revoke
 
 SERVER := server
+# Gradle needs a JDK; resolve mise's pin even from a shell without `mise activate`.
+export JAVA_HOME ?= $(shell mise where java 2>/dev/null)
 
 help: ## List tasks
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
