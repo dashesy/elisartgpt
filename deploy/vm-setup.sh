@@ -20,6 +20,7 @@ command -v mise >/dev/null || { curl https://mise.run | sh; echo 'eval "$($HOME/
 export PATH="$HOME/.local/bin:$PATH"
 
 [ -d ~/elisartgpt ] || git clone https://github.com/dashesy/elisartgpt.git ~/elisartgpt
-cd ~/elisartgpt && mise trust && mise install && (cd server && mise exec -- uv sync)
+# Only the server toolchain: the JDK/ktlint pins are for building the Android app.
+cd ~/elisartgpt && mise trust && mise install python uv && (cd server && mise exec -- uv sync)
 
 echo "next: sudo tailscale up; codex login --device-auth; see deploy/README.md"
