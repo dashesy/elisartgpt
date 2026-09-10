@@ -1,4 +1,4 @@
-package art.alisa.ui
+package art.elisa.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,8 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
-import art.alisa.Api
-import art.alisa.Store
+import art.elisa.Api
+import art.elisa.Store
 import kotlinx.coroutines.launch
 
 /** First launch: type the invite code. We check it against the server before saving. */
@@ -64,7 +64,7 @@ fun PairScreen(store: Store, onPaired: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("🎨", style = MaterialTheme.typography.displayLarge)
-        Text("Alisa Art", style = MaterialTheme.typography.headlineMedium)
+        Text("Elisa Art", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text("Enter the code you were given", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(24.dp))

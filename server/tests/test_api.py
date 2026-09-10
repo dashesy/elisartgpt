@@ -18,7 +18,7 @@ def client(tmp_path: Path, monkeypatch):
 
 @pytest.fixture
 def code(tmp_path: Path) -> str:
-    return Codes(tmp_path / "codes.json").add("alisa")
+    return Codes(tmp_path / "codes.json").add("elisa")
 
 
 def _fake_turn(png: Path):
@@ -43,7 +43,7 @@ def test_whoami_and_quota(client, code, tmp_path, monkeypatch):
     h = {"Authorization": f"Bearer {code.lower()}"}  # case-insensitive on purpose
 
     assert client.get("/whoami", headers=h).json() == {
-        "name": "alisa",
+        "name": "elisa",
         "drawings_left_this_hour": 2,
     }
     first = client.post("/drawings", json={"prompt": "red circle"}, headers=h)
@@ -72,7 +72,7 @@ def test_galleries_are_per_person(client, code, tmp_path, monkeypatch):
 
 
 def test_revoked_code_is_rejected(client, code, tmp_path):
-    Codes(tmp_path / "codes.json").revoke("alisa")
+    Codes(tmp_path / "codes.json").revoke("elisa")
     assert client.get("/whoami", headers={"Authorization": f"Bearer {code}"}).status_code == 401
 
 
@@ -80,3 +80,17 @@ def test_download_page_without_apk(client):
     r = client.get("/")
     assert r.status_code == 200 and "not uploaded yet" in r.text
     assert client.get("/app/elisart.apk").status_code == 404
+
+
+def test_app_version(client, tmp_path, monkeypatch):
+    assert client.get("/app/version").status_code == 404
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "version.json").write_text(
+        '{"versionCode": 7, "versionName": "0.7-abc", "url": ""}'
+    )
+    monkeypatch.setattr(main.settings, "public_url", "https://example.test")
+    assert client.get("/app/version").json() == {
+        "versionCode": 7,
+        "versionName": "0.7-abc",
+        "url": "https://example.test/app/elisart.apk",
+    }

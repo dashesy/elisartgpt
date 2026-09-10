@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     def apk_path(self) -> Path:
         return self.data_dir / "app" / "elisart.apk"
 
+    @property
+    def apk_version_path(self) -> Path:
+        return self.data_dir / "app" / "version.json"
+
     def prepare_workspace(self) -> None:
         """Codex reads AGENTS.md from its working directory; that file is what
         turns a coding agent into an art helper."""

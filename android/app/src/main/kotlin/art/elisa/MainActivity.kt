@@ -1,4 +1,4 @@
-package art.alisa
+package art.elisa
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,8 +12,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import art.alisa.ui.DrawScreen
-import art.alisa.ui.PairScreen
+import art.elisa.ui.DrawScreen
+import art.elisa.ui.PairScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

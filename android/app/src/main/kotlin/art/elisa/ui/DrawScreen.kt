@@ -1,4 +1,4 @@
-package art.alisa.ui
+package art.elisa.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,10 +47,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.TextButton
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import art.alisa.Api
-import art.alisa.Drawing
+import art.elisa.Api
+import art.elisa.AppVersion
+import art.elisa.BuildConfig
+import art.elisa.Drawing
 import kotlinx.coroutines.launch
 
 /**
@@ -66,9 +73,14 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showGallery by remember { mutableStateOf(false) }
+    var update by remember { mutableStateOf<AppVersion?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { gallery.addAll(api.drawings()) }
+        // Sideloaded apps never update themselves; this is the whole update story.
+        runCatching { api.appVersion() }.getOrNull()
+            ?.takeIf { it.versionCode > BuildConfig.VERSION_CODE }
+            ?.let { update = it }
     }
 
     fun run(block: suspend () -> Drawing) {
@@ -96,7 +108,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
 
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("🎨 Alisa Art", style = MaterialTheme.typography.headlineSmall)
+            Text("🎨 Elisa Art", style = MaterialTheme.typography.headlineSmall)
             Row {
                 IconButton(onClick = { showGallery = true }) { Icon(Icons.Filled.Collections, "Gallery") }
                 IconButton(onClick = onForget) { Icon(Icons.Filled.Logout, "Forget code") }
@@ -104,6 +116,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+            update?.let { UpdateBanner(it) { update = null } }
             Spacer(Modifier.height(8.dp))
             Box(
                 Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp))
@@ -162,6 +175,22 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
             }
+        }
+    }
+}
+
+/** Opens the APK link in the browser; Android's installer takes over from there. */
+@Composable
+private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    Card(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)),
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("New version ${v.versionName} is out!", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onDismiss) { Text("Later") }
+            Button(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(v.url))) }) { Text("Update") }
         }
     }
 }

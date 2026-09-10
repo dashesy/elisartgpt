@@ -10,21 +10,29 @@ plugins {
 // Release signing comes from android/keystore.properties (gitignored) so the
 // same key signs every build you hand out; without it Gradle falls back to the
 // debug key, which still installs fine for personal testing.
+fun git(vararg args: String): String = ProcessBuilder("git", *args)
+    .directory(rootProject.projectDir).redirectErrorStream(true).start()
+    .inputStream.bufferedReader().readText().trim()
+fun gitCommitCount() = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
+fun gitShortSha() = git("rev-parse", "--short", "HEAD").ifBlank { "dev" }
+
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
-    namespace = "art.alisa"
+    namespace = "art.elisa"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "art.alisa"
+        applicationId = "art.elisa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        // Monotonic from git so `make publish` never needs a manual bump; the
+        // update check in the app compares this number against the server's.
+        versionCode = gitCommitCount()
+        versionName = "0.${gitCommitCount()}-${gitShortSha()}"
         // The server people install against. Override for a dev build with
         // -PserverUrl=http://10.0.2.2:8787 (emulator -> host).
         val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://EXAMPLE.sslip.io"

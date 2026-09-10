@@ -1,4 +1,4 @@
-# elisartgpt — Alisa Art
+# elisartgpt — Elisa Art
 
 A personal art app: an Android client sends a prompt to a small server on my
 VM, the server drives OpenAI Codex CLI (signed in with my ChatGPT account, no
@@ -16,7 +16,7 @@ per drawing, so "make it blue" edits the same picture.
 
 - Secrets never enter the repo. Server config lives in `.env` (see `.env.example`);
   the ChatGPT credential lives only in `~/.codex/auth.json` on the VM.
-- People authenticate with an invite code (`make code NAME=alisa`), sent as a
+- People authenticate with an invite code (`make code NAME=elisa`), sent as a
   bearer token and stored hashed in `data/codes.json`. Each code owns its own
   gallery and hourly quota. The app ships with the server URL and asks only
   for the code.

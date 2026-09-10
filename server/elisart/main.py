@@ -51,6 +51,12 @@ class Drawing(BaseModel):
     error: str | None = None
 
 
+class AppVersion(BaseModel):
+    versionCode: int
+    versionName: str
+    url: str
+
+
 class Whoami(BaseModel):
     name: str
     drawings_left_this_hour: int
@@ -112,14 +118,14 @@ def download_page() -> str:
     )
     return f"""<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
-<title>Alisa Art</title>
+<title>Elisa Art</title>
 <style>
 body{{font-family:system-ui;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.5}}
 .btn{{display:inline-block;background:#e91e63;color:#fff;padding:.8rem 1.4rem;
      border-radius:.6rem;text-decoration:none;font-weight:600}}
 ol li{{margin:.4rem 0}}
 </style>
-<h1>🎨 Alisa Art</h1>
+<h1>🎨 Elisa Art</h1>
 <p>Type what you want to see, get a picture.</p>
 {link}
 <ol><li>Install the app (Android; allow installs from your browser if asked).</li>
@@ -135,6 +141,16 @@ def apk() -> FileResponse:
         media_type="application/vnd.android.package-archive",
         filename="elisart.apk",
     )
+
+
+@app.get("/app/version")
+def app_version() -> AppVersion:
+    """What the app compares itself against on launch. Public: it holds no secret."""
+    if not settings.apk_version_path.exists():
+        raise HTTPException(404, "app not uploaded yet")
+    v = AppVersion.model_validate_json(settings.apk_version_path.read_text())
+    v.url = f"{settings.public_url}/app/elisart.apk"
+    return v
 
 
 @app.get("/whoami")

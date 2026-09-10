@@ -27,17 +27,20 @@ fmt: ## Format
 smoke: ## Generate one picture through codex end to end (uses your plan)
 	cd $(SERVER) && uv run python -m elisart.smoke
 
-code: ## Mint an invite code: make code NAME=alisa
+code: ## Mint an invite code: make code NAME=elisa
 	cd $(SERVER) && uv run python -m elisart.codes add $(NAME)
 
 codes: ## List invite codes
 	cd $(SERVER) && uv run python -m elisart.codes list
 
-revoke: ## Revoke someone's code: make revoke NAME=alisa
+revoke: ## Revoke someone's code: make revoke NAME=elisa
 	cd $(SERVER) && uv run python -m elisart.codes revoke $(NAME)
 
 apk: ## Build the signed release APK (android/keystore.properties; debug key if absent)
 	cd android && ./gradlew -q assembleRelease && ls -la app/build/outputs/apk/release/elisart.apk
 
-publish: apk ## Build and upload the APK to the VM's download page
-	scp android/app/build/outputs/apk/release/elisart.apk elisart:elisartgpt/data/app/elisart.apk
+publish: apk ## Build and upload the APK (+ version.json for the in-app update check)
+	@out=android/app/build/outputs/apk/release; \
+	jq '{versionCode: .elements[0].versionCode, versionName: .elements[0].versionName, url: ""}' $$out/output-metadata.json > $$out/version.json; \
+	cat $$out/version.json; \
+	ssh elisart 'mkdir -p elisartgpt/data/app' && scp $$out/elisart.apk $$out/version.json elisart:elisartgpt/data/app/

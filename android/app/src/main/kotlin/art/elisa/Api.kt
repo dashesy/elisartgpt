@@ -1,4 +1,4 @@
-package art.alisa
+package art.elisa
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,6 +23,9 @@ data class Drawing(
 data class Whoami(val name: String, val drawings_left_this_hour: Int)
 
 @Serializable
+data class AppVersion(val versionCode: Int, val versionName: String, val url: String)
+
+@Serializable
 private data class PromptBody(val prompt: String)
 
 class ApiError(val status: Int, message: String) : IOException(message)
@@ -40,6 +43,7 @@ class Api(private val baseUrl: String, private val code: String) {
     val authHeader get() = "Bearer $code"
 
     suspend fun whoami(): Whoami = get("/whoami")
+    suspend fun appVersion(): AppVersion = get("/app/version")
     suspend fun drawings(): List<Drawing> = get("/drawings")
     suspend fun newDrawing(prompt: String): Drawing = post("/drawings", PromptBody(prompt))
     suspend fun continueDrawing(id: String, prompt: String): Drawing =

@@ -1,6 +1,6 @@
 """Invite codes: the only credential the app holds.
 
-A code is minted per person (`python -m elisart.codes add alisa`), shown once,
+A code is minted per person (`python -m elisart.codes add elisa`), shown once,
 and stored only as a SHA-256 hash. Each code owns its own gallery and quota, so
 revoking one person never disturbs another.
 """

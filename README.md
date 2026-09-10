@@ -1,4 +1,4 @@
-# elisartgpt — Alisa Art
+# elisartgpt — Elisa Art
 
 Type what you want to see, get a picture. An Android app talks to a small
 server on my VM; the server drives [Codex CLI](https://github.com/openai/codex)
