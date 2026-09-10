@@ -1,0 +1,11 @@
+# Public HTTPS front for the server. The hostname is the VM's public IP spelled
+# out under sslip.io, so no DNS setup is needed; Caddy fetches the certificate.
+EXAMPLE.sslip.io {
+	encode gzip
+	# Image turns take 30-60 s; keep the proxy patient.
+	reverse_proxy 127.0.0.1:8787 {
+		transport http {
+			response_header_timeout 5m
+		}
+	}
+}

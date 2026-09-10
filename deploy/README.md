@@ -1,15 +1,19 @@
 # Deploying to the VM
 
-Target: a small Ubuntu 24.04 VM (Azure `elisart`, ssh alias of the same name). Nothing is exposed to the public
-internet; the phone reaches the server over Tailscale.
+Target: the Azure VM `elisart` (Ubuntu 24.04, ssh alias of the same name).
+Caddy serves HTTPS on the public IP's sslip.io name; the API listens only on
+localhost behind it. Ports 22, 80 and 443 are open in the VM's NSG.
 
-1. `ssh` in and run `deploy/vm-setup.sh`. It installs Tailscale, Node + Codex,
+1. `ssh elisart` and run `deploy/vm-setup.sh`. It installs Caddy, Node + Codex,
    mise, and clones this repo to `~/elisartgpt`.
-2. `sudo tailscale up` and approve the machine in the admin console.
-3. `codex login --device-auth` — first enable "device code login" under
+2. `codex login --device-auth` — first enable "device code login" under
    ChatGPT → Settings → Security. Verify with `codex login status`.
-4. `cp .env.example .env`, set `ELISART_TOKEN` (`openssl rand -hex 32`) and
-   `ELISART_HOST` to the VM's Tailscale IP (`tailscale ip -4`).
+3. `cp .env.example .env`; set `ELISART_PUBLIC_URL=https://EXAMPLE.sslip.io`.
+4. `sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 5. `sudo cp deploy/elisart@.service /etc/systemd/system/ && sudo systemctl enable --now elisart@$USER`.
+6. `make code NAME=<person>` and hand them the code plus the public URL.
 
-Check: `curl http://<tailscale-ip>:8787/health` from a device on the tailnet.
+Check: `curl https://EXAMPLE.sslip.io/health`.
+
+Publish a new app build: `make apk` locally, then
+`scp android/app/build/outputs/apk/release/elisart.apk elisart:elisartgpt/data/app/`.

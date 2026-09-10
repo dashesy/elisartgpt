@@ -5,8 +5,13 @@ set -euo pipefail
 sudo apt-get update -y
 sudo apt-get install -y curl git build-essential
 
-# Tailscale: the only network path to the server.
-command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
+# Caddy terminates HTTPS in front of the server (official repo; Ubuntu's is old).
+if ! command -v caddy >/dev/null; then
+  sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+  sudo apt-get update -y && sudo apt-get install -y caddy
+fi
 
 # Codex CLI ships on npm. Node 22 via NodeSource keeps it independent of mise.
 if ! command -v node >/dev/null; then
@@ -23,4 +28,4 @@ export PATH="$HOME/.local/bin:$PATH"
 # Only the server toolchain: the JDK/ktlint pins are for building the Android app.
 cd ~/elisartgpt && mise trust && mise install python uv && (cd server && mise exec -- uv sync)
 
-echo "next: sudo tailscale up; codex login --device-auth; see deploy/README.md"
+echo "next: codex login --device-auth; then follow deploy/README.md"
