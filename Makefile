@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk code codes revoke
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke
 
 SERVER := server
 
@@ -36,5 +36,8 @@ codes: ## List invite codes
 revoke: ## Revoke someone's code: make revoke NAME=alisa
 	cd $(SERVER) && uv run python -m elisart.codes revoke $(NAME)
 
-apk: ## Build the debug APK
-	cd android && ./gradlew assembleDebug
+apk: ## Build the signed release APK (android/keystore.properties; debug key if absent)
+	cd android && ./gradlew -q assembleRelease && ls -la app/build/outputs/apk/release/elisart.apk
+
+publish: apk ## Build and upload the APK to the VM's download page
+	scp android/app/build/outputs/apk/release/elisart.apk elisart:elisartgpt/data/app/elisart.apk

@@ -11,6 +11,12 @@ phone ──HTTPS over Tailscale──▶ server (FastAPI) ──codex exec─�
                                       └── copies PNG ◀──┘  ~/.codex/generated_images/<thread>/
 ```
 
+## Give someone the app
+
+1. `make code NAME=<person>` on the VM and send them the code.
+2. Send them the download link (the server's `/` page). They install the APK,
+   open it, type the code, and draw.
+
 ## Run locally
 
 ```
