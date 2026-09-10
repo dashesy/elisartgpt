@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     rate_limit_per_hour: int = 20
     # Shown on the download page so people know what to type into the app.
     public_url: str = "http://127.0.0.1:8787"
+    # When off, the landing page, APK and version check return 404 while the
+    # authenticated API keeps working for phones that already have the app.
+    downloads: bool = True
 
     @field_validator("data_dir", mode="after")
     @classmethod

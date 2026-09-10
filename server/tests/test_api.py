@@ -94,3 +94,11 @@ def test_app_version(client, tmp_path, monkeypatch):
         "versionName": "0.7-abc",
         "url": "https://example.test/app/elisart.apk",
     }
+
+
+def test_downloads_off_hides_public_surface_only(client, code, monkeypatch):
+    monkeypatch.setattr(main.settings, "downloads", False)
+    assert client.get("/").status_code == 404
+    assert client.get("/app/elisart.apk").status_code == 404
+    assert client.get("/app/version").status_code == 404
+    assert client.get("/whoami", headers={"Authorization": f"Bearer {code}"}).status_code == 200

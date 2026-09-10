@@ -107,9 +107,15 @@ def health() -> dict:
     return {"ok": True}
 
 
+def _require_downloads() -> None:
+    if not settings.downloads:
+        raise HTTPException(404, "not found")
+
+
 @app.get("/", response_class=HTMLResponse)
 def download_page() -> str:
     """Public landing page: install link plus the two-step instruction."""
+    _require_downloads()
     has_apk = settings.apk_path.exists()
     link = (
         '<a class="btn" href="/app/elisart.apk">Download the app</a>'
@@ -134,6 +140,7 @@ ol li{{margin:.4rem 0}}
 
 @app.get("/app/elisart.apk")
 def apk() -> FileResponse:
+    _require_downloads()
     if not settings.apk_path.exists():
         raise HTTPException(404, "app not uploaded yet")
     return FileResponse(
@@ -146,6 +153,7 @@ def apk() -> FileResponse:
 @app.get("/app/version")
 def app_version() -> AppVersion:
     """What the app compares itself against on launch. Public: it holds no secret."""
+    _require_downloads()
     if not settings.apk_version_path.exists():
         raise HTTPException(404, "app not uploaded yet")
     v = AppVersion.model_validate_json(settings.apk_version_path.read_text())

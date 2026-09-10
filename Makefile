@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke downloads-on downloads-off vm-status
 
 SERVER := server
 # Gradle needs a JDK; resolve mise's pin even from a shell without `mise activate`.
@@ -28,6 +28,18 @@ fmt: ## Format
 
 smoke: ## Generate one picture through codex end to end (uses your plan)
 	cd $(SERVER) && uv run python -m elisart.smoke
+
+VM := elisart
+VM_REPO := elisartgpt
+
+downloads-on: ## VM: expose the download page + APK
+	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=true/" .env && sudo systemctl restart elisart@$$USER' && curl -s -o /dev/null -w "download page: %{http_code}\n" https://EXAMPLE.sslip.io/
+
+downloads-off: ## VM: hide the download page + APK (API keeps working)
+	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=false/" .env && sudo systemctl restart elisart@$$USER' && curl -s -o /dev/null -w "download page: %{http_code}\n" https://EXAMPLE.sslip.io/
+
+vm-status: ## VM: service state and recent log lines
+	ssh $(VM) 'systemctl is-active elisart@$$USER caddy | paste -sd" "; journalctl -u elisart@$$USER -n 5 --no-pager -o cat'
 
 code: ## Mint an invite code: make code NAME=elisa
 	cd $(SERVER) && uv run python -m elisart.codes add $(NAME)
