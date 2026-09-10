@@ -42,8 +42,10 @@ make emu-stop
 Screen is 1080x2400. `input text` needs `%s` for spaces. A drawing takes
 30-90 s: screenshot again after `sleep 60`. Gotchas that cost time once:
 `avdmanager` only finds system images when it runs from a *copy* of
-`cmdline-tools` under the SDK root (not the Homebrew path, not a symlink), and
-Gradle/adb tooling needs `JAVA_HOME` (`mise where java`).
+`cmdline-tools` under the SDK root (not the Homebrew path, not a symlink);
+Gradle/adb tooling needs `JAVA_HOME` (`mise where java`); and a fresh AVD has
+`hw.keyboard=no`, so the Mac keyboard does nothing in the window until
+`~/.android/avd/elisart.avd/config.ini` says `hw.keyboard = yes`.
 
 ## Codex facts this code relies on
 
