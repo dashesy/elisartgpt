@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk
+.PHONY: help setup dev test lint fmt smoke apk code codes revoke
 
 SERVER := server
 
@@ -10,7 +10,7 @@ setup: ## One-time: tools, deps, hooks, .env
 	mise install
 	cd $(SERVER) && uv sync
 	mise exec -- lefthook install
-	@test -f .env || { cp .env.example .env; echo "created .env — set ELISART_TOKEN"; }
+	@test -f .env || { cp .env.example .env; echo "created .env"; }
 
 dev: ## Run the server locally with reload
 	cd $(SERVER) && uv run uvicorn elisart.main:app --reload --host $${ELISART_HOST:-127.0.0.1} --port $${ELISART_PORT:-8787}
@@ -26,6 +26,15 @@ fmt: ## Format
 
 smoke: ## Generate one picture through codex end to end (uses your plan)
 	cd $(SERVER) && uv run python -m elisart.smoke
+
+code: ## Mint an invite code: make code NAME=alisa
+	cd $(SERVER) && uv run python -m elisart.codes add $(NAME)
+
+codes: ## List invite codes
+	cd $(SERVER) && uv run python -m elisart.codes list
+
+revoke: ## Revoke someone's code: make revoke NAME=alisa
+	cd $(SERVER) && uv run python -m elisart.codes revoke $(NAME)
 
 apk: ## Build the debug APK
 	cd android && ./gradlew assembleDebug

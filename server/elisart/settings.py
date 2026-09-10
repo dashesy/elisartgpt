@@ -11,13 +11,17 @@ ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ELISART_", env_file=ROOT / ".env", extra="ignore")
 
-    token: str = "change-me"
     host: str = "127.0.0.1"
     port: int = 8787
     data_dir: Path = ROOT / "data"
     codex_bin: str = "codex"
     # Codex writes generated pictures under $CODEX_HOME/generated_images/<thread_id>/.
     codex_home: Path = Path.home() / ".codex"
+    # Drawings per person per rolling hour. Image turns eat the ChatGPT plan's
+    # limits several times faster than text, so this is the plan's safety valve.
+    rate_limit_per_hour: int = 20
+    # Shown on the download page so people know what to type into the app.
+    public_url: str = "http://127.0.0.1:8787"
 
     @field_validator("data_dir", mode="after")
     @classmethod
@@ -33,6 +37,14 @@ class Settings(BaseSettings):
     @property
     def workspace_dir(self) -> Path:
         return self.data_dir / "workspace"
+
+    @property
+    def codes_file(self) -> Path:
+        return self.data_dir / "codes.json"
+
+    @property
+    def apk_path(self) -> Path:
+        return self.data_dir / "app" / "elisart.apk"
 
     def prepare_workspace(self) -> None:
         """Codex reads AGENTS.md from its working directory; that file is what

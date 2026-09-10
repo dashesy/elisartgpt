@@ -16,7 +16,10 @@ per drawing, so "make it blue" edits the same picture.
 
 - Secrets never enter the repo. Server config lives in `.env` (see `.env.example`);
   the ChatGPT credential lives only in `~/.codex/auth.json` on the VM.
-- The app never bakes in a URL or token; both come from its settings screen.
+- People authenticate with an invite code (`make code NAME=alisa`), sent as a
+  bearer token and stored hashed in `data/codes.json`. Each code owns its own
+  gallery and hourly quota. The app ships with the server URL and asks only
+  for the code.
 - Tools are pinned in `mise.toml`. Python is always `uv run`, never bare `python`.
 - `make help` lists every task. Tests and lint run through the Makefile.
 - Comment the *why*, never the *what*.
