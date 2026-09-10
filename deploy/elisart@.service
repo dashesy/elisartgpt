@@ -7,7 +7,7 @@ Wants=network-online.target
 User=%i
 WorkingDirectory=/home/%i/elisartgpt/server
 EnvironmentFile=/home/%i/elisartgpt/.env
-ExecStart=/home/%i/.local/bin/mise exec -- uv run uvicorn elisart.main:app --host ${ELISART_HOST} --port ${ELISART_PORT}
+ExecStart=/home/%i/elisartgpt/server/.venv/bin/python -m uvicorn elisart.main:app --host ${ELISART_HOST} --port ${ELISART_PORT}
 Restart=on-failure
 RestartSec=5
 
