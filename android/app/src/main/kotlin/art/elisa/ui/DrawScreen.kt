@@ -24,7 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Collections
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -59,6 +61,7 @@ import art.elisa.Api
 import art.elisa.AppVersion
 import art.elisa.BuildConfig
 import art.elisa.Drawing
+import art.elisa.Whoami
 import kotlinx.coroutines.launch
 
 /**
@@ -75,7 +78,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var showGallery by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<AppVersion?>(null) }
-    var confirmForget by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         runCatching { gallery.addAll(api.drawings()) }
@@ -105,15 +108,9 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         }
     }
 
-    if (confirmForget) {
-        // One stray tap must not log a kid out; the drawings stay on the server either way.
-        AlertDialog(
-            onDismissRequest = { confirmForget = false },
-            title = { Text("Forget this code?") },
-            text = { Text("You'll need to type the code again to draw. Your drawings are kept.") },
-            confirmButton = { TextButton(onClick = { confirmForget = false; onForget() }) { Text("Forget") } },
-            dismissButton = { Button(onClick = { confirmForget = false }) { Text("Keep drawing") } },
-        )
+    if (showSettings) {
+        SettingsScreen(api, onBack = { showSettings = false }, onForget = onForget)
+        return
     }
 
     if (showGallery) {
@@ -126,7 +123,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
             Text("🎨 Elisa Art", style = MaterialTheme.typography.headlineSmall)
             Row {
                 IconButton(onClick = { showGallery = true }) { Icon(Icons.Filled.Collections, "Gallery") }
-                IconButton(onClick = { confirmForget = true }) { Icon(Icons.Filled.Logout, "Forget code") }
+                IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, "Settings") }
             }
         }
 
@@ -191,6 +188,44 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
             }
         }
+    }
+}
+
+/**
+ * Who am I, how many drawings are left, which build. "Forget code" lives only
+ * here, behind a confirmation: a stray tap on the main screen must never log a
+ * kid out. Drawings stay on the server either way.
+ */
+@Composable
+private fun SettingsScreen(api: Api, onBack: () -> Unit, onForget: () -> Unit) {
+    var who by remember { mutableStateOf<Whoami?>(null) }
+    var confirm by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { who = runCatching { api.whoami() }.getOrNull() }
+
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back") }
+            Text("Settings", style = MaterialTheme.typography.headlineSmall)
+        }
+        ListItem(headlineContent = { Text("Signed in as") }, supportingContent = { Text(who?.name ?: "…") })
+        ListItem(
+            headlineContent = { Text("Drawings left this hour") },
+            supportingContent = { Text(who?.drawings_left_this_hour?.toString() ?: "…") },
+        )
+        ListItem(headlineContent = { Text("App version") }, supportingContent = { Text(BuildConfig.VERSION_NAME) })
+        HorizontalDivider(Modifier.padding(vertical = 16.dp))
+        Spacer(Modifier.weight(1f))
+        OutlinedButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Forget code on this device") }
+    }
+
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Forget this code?") },
+            text = { Text("You'll need to type the code again to draw. Your drawings are kept.") },
+            confirmButton = { TextButton(onClick = { confirm = false; onForget() }) { Text("Forget") } },
+            dismissButton = { Button(onClick = { confirm = false }) { Text("Keep drawing") } },
+        )
     }
 }
 
