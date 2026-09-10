@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.TextButton
@@ -74,9 +75,12 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var showGallery by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<AppVersion?>(null) }
+    var confirmForget by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         runCatching { gallery.addAll(api.drawings()) }
+        // Reopen where we left off: the newest drawing, so "Change it" still works.
+        if (current == null) current = gallery.firstOrNull { it.images.isNotEmpty() }
         // Sideloaded apps never update themselves; this is the whole update story.
         runCatching { api.appVersion() }.getOrNull()
             ?.takeIf { it.versionCode > BuildConfig.VERSION_CODE }
@@ -101,6 +105,17 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         }
     }
 
+    if (confirmForget) {
+        // One stray tap must not log a kid out; the drawings stay on the server either way.
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Forget this code?") },
+            text = { Text("You'll need to type the code again to draw. Your drawings are kept.") },
+            confirmButton = { TextButton(onClick = { confirmForget = false; onForget() }) { Text("Forget") } },
+            dismissButton = { Button(onClick = { confirmForget = false }) { Text("Keep drawing") } },
+        )
+    }
+
     if (showGallery) {
         GalleryScreen(api, gallery, onPick = { current = it; showGallery = false }, onBack = { showGallery = false })
         return
@@ -111,7 +126,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
             Text("🎨 Elisa Art", style = MaterialTheme.typography.headlineSmall)
             Row {
                 IconButton(onClick = { showGallery = true }) { Icon(Icons.Filled.Collections, "Gallery") }
-                IconButton(onClick = onForget) { Icon(Icons.Filled.Logout, "Forget code") }
+                IconButton(onClick = { confirmForget = true }) { Icon(Icons.Filled.Logout, "Forget code") }
             }
         }
 
