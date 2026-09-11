@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The connection diagnosis reports wifi/mobile/VPN state. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Talk instead of type: the app records for the system speech recognizer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Saving into Pictures/Elisa Art needs this only on Android 9 and older. -->

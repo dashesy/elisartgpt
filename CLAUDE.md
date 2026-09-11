@@ -48,6 +48,12 @@ per drawing, so "make it blue" edits the same picture.
   (Pictures/Elisa Art via MediaStore), Delete drawing (server `DELETE`), and
   from the gallery "Open chat", which scrolls the thread to that picture. New
   pictures are also saved to Pictures/Elisa Art on arrival (Android 10+).
+- When the phone cannot reach the server (not an HTTP error), both screens show
+  "Send a diagnosis": `Diagnosis.kt` probes DNS, TCP 443/80, `/health`, a
+  Google control URL, and reports network type, VPN and private DNS, then
+  opens the mail app addressed to `ELISART_SUPPORT_EMAIL` from `.env` (baked
+  into the APK; empty hides the button). The report is also in logcat under
+  the `elisart` tag.
 - Voice: a mic button beside the text box runs Android's `SpeechRecognizer`
   in-app (RECORD_AUDIO, asked once), Persian by default with an English switch
   in Settings; words stream into the box as they are heard. Hints and the

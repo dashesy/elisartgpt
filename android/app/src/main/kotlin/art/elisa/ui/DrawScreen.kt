@@ -95,6 +95,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.Color
 import art.elisa.Media
 import art.elisa.Api
+import art.elisa.ApiError
+import art.elisa.Diagnosis
 import art.elisa.AppVersion
 import art.elisa.BuildConfig
 import art.elisa.Drawing
@@ -128,6 +130,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     var pending by remember { mutableStateOf<Pending?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<Throwable?>(null) }
     var showGallery by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<AppVersion?>(null) }
     var showSettings by remember { mutableStateOf(false) }
@@ -158,7 +161,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     // spinner is already on screen, where a wait is expected anyway.
     fun run(fresh: Boolean, block: suspend (String, List<ByteArray>) -> Drawing) {
         if (busy) return
-        busy = true; error = null
+        busy = true; error = null; failure = null
         // Like any chat: the composer empties on send, and refills if the send fails.
         val sent = Pending(prompt, photos.toList())
         pending = sent
@@ -184,7 +187,12 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 current = before
                 prompt = sent.prompt
                 photos.addAll(sent.photos)
-                error = e.message ?: "Something went wrong."
+                if (e is ApiError) {
+                    error = e.message
+                } else {
+                    failure = e
+                    error = "Couldn't reach the server."
+                }
             } finally {
                 pending = null
                 busy = false
@@ -263,7 +271,10 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         // Above the composer, not inside the thread: it must be visible even when
         // the list is scrolled elsewhere, and it goes away on the next attempt.
         error?.let { e ->
-            Text(e, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(e, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+                if (failure != null && Diagnosis.available) DiagnosisButton(serverUrl = api.baseUrl, failure = failure, busy = busy)
+            }
         }
         Spacer(Modifier.height(8.dp))
         PhotoStrip(photos, enabled = !busy)

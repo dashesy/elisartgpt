@@ -44,7 +44,7 @@ private data class PromptBody(val prompt: String)
 class ApiError(val status: Int, message: String) : IOException(message)
 
 /** Thin client for the elisart server. The invite code is the bearer token. */
-class Api(private val baseUrl: String, private val code: String) {
+class Api(val baseUrl: String, private val code: String) {
     private val json = Json { ignoreUnknownKeys = true }
     private val client = OkHttpClient.Builder()
         // A drawing is one Codex turn: 30-90 s is normal, so wait well past that.

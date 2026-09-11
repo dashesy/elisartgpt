@@ -45,6 +45,10 @@ android {
             ?: dotenv.getProperty("ELISART_PUBLIC_URL")
             ?: "http://10.0.2.2:8787"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
+        // Where "send diagnosis" mails go. From .env only, so the address is not in git;
+        // empty (a CI or stranger's build) hides the button.
+        val supportEmail = dotenv.getProperty("ELISART_SUPPORT_EMAIL") ?: ""
+        buildConfigField("String", "SUPPORT_EMAIL", "\"$supportEmail\"")
     }
 
     signingConfigs {

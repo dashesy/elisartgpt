@@ -28,6 +28,9 @@ import androidx.compose.ui.unit.dp
 import art.elisa.Api
 import art.elisa.Store
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
+import art.elisa.ApiError
+import art.elisa.Diagnosis
 
 /** First launch: type the invite code. We check it against the server before saving. */
 @Composable
@@ -37,12 +40,15 @@ fun PairScreen(store: Store, onPaired: (String) -> Unit) {
     var showServer by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Kept so "send diagnosis" can include the real exception, not the friendly line.
+    var failure by remember { mutableStateOf<Throwable?>(null) }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     fun submit() {
         val trimmed = code.trim().uppercase()
         if (trimmed.isEmpty() || busy) return
-        busy = true; error = null
+        busy = true; error = null; failure = null
         scope.launch {
             try {
                 store.serverUrl = server
@@ -50,8 +56,11 @@ fun PairScreen(store: Store, onPaired: (String) -> Unit) {
                 store.code = trimmed
                 onPaired(trimmed)
                 error = "Hi ${who.name}!"
+            } catch (e: ApiError) {
+                error = e.message
             } catch (e: Exception) {
-                error = e.message ?: "Couldn't reach the server."
+                failure = e
+                error = "Couldn't reach the server."
             } finally {
                 busy = false
             }
@@ -92,9 +101,34 @@ fun PairScreen(store: Store, onPaired: (String) -> Unit) {
             Spacer(Modifier.height(12.dp))
             Text(it, color = MaterialTheme.colorScheme.error)
         }
+        if (failure != null && Diagnosis.available) {
+            DiagnosisButton(serverUrl = server, failure = failure, busy = busy)
+        }
         Spacer(Modifier.height(24.dp))
         TextButton(onClick = { showServer = !showServer }) {
             Text(if (showServer) "Hide server" else "Use a different server")
         }
     }
+}
+
+
+/** One tap: gather the report (a few seconds of probes), then open the mail app with it. */
+@Composable
+fun DiagnosisButton(serverUrl: String, failure: Throwable?, busy: Boolean) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var working by remember { mutableStateOf(false) }
+    TextButton(
+        onClick = {
+            working = true
+            scope.launch {
+                try {
+                    Diagnosis.send(ctx, Diagnosis.collect(ctx, serverUrl, failure))
+                } finally {
+                    working = false
+                }
+            }
+        },
+        enabled = !busy && !working,
+    ) { Text(if (working) "Checking the connection…" else "Send a diagnosis") }
 }
