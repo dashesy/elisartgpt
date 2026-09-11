@@ -54,6 +54,16 @@ MAX_PHOTO_BYTES = 8 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
+class Turn(BaseModel):
+    """One exchange: what the person said and attached, what came back."""
+
+    prompt: str
+    photos: list[str] = []
+    images: list[str] = []
+    text: str = ""
+    at: float
+
+
 class Drawing(BaseModel):
     id: str
     thread_id: str | None
@@ -61,6 +71,9 @@ class Drawing(BaseModel):
     images: list[str]
     # Uploaded reference photos, in the order they were attached across turns.
     photos: list[str] = []
+    # The conversation, oldest first. `images`/`photos`/`text` above are the
+    # flattened view older app builds still read.
+    turns: list[Turn] = []
     error: str | None = None
 
 
@@ -87,7 +100,11 @@ def _load(user: str, drawing_id: str) -> Drawing:
     path = _meta_path(user, drawing_id)
     if not path.exists():
         raise HTTPException(404, "no such drawing")
-    return Drawing.model_validate_json(path.read_text())
+    d = Drawing.model_validate_json(path.read_text())
+    if not d.turns and d.images:
+        # Drawings from before turns were recorded: show them as one exchange.
+        d.turns = [Turn(prompt="", images=d.images, text=d.text, at=path.stat().st_mtime)]
+    return d
 
 
 def _save(user: str, d: Drawing) -> None:
@@ -220,8 +237,7 @@ async def _read_request(request: Request) -> tuple[str, list[UploadFile]]:
     prompt = str(form.get("prompt", "")).strip()
     if not prompt and not photos:
         raise HTTPException(422, "say what to draw, or add a photo")
-    # A photo with no words is a complete request; give the model something to answer.
-    return prompt or "Draw a picture from these photos.", photos
+    return prompt, photos
 
 
 async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[Path]:
@@ -241,8 +257,10 @@ async def _turn(user: str, d: Drawing, prompt: str, photos: list[UploadFile]) ->
         raise HTTPException(429, "that's enough drawings for this hour, try again later")
     _record_turn(user)
     photo_paths = await _save_photos(user, d, photos)
+    turn = Turn(prompt=prompt, photos=[p.name for p in photo_paths], at=time.time())
     result = await codex.run_turn(
-        prompt,
+        # A photo with no words is a complete request; give the model something to answer.
+        prompt or "Draw a picture from these photos.",
         workspace=settings.workspace_dir,
         codex_home=settings.codex_home,
         codex_bin=settings.codex_bin,
@@ -257,6 +275,9 @@ async def _turn(user: str, d: Drawing, prompt: str, photos: list[UploadFile]) ->
         name = f"{len(d.images) + 1:03d}.png"
         shutil.copy2(src, dest / name)
         d.images.append(name)
+        turn.images.append(name)
+    turn.text = result.text
+    d.turns.append(turn)
     _save(user, d)
     if d.error and not result.images:
         raise HTTPException(502, d.error)
@@ -282,3 +303,12 @@ def image(user: User, drawing_id: str, name: str) -> FileResponse:
     if name not in d.images:
         raise HTTPException(404, "no such image")
     return FileResponse(_user_dir(user) / d.id / name, media_type="image/png")
+
+
+@app.get("/drawings/{drawing_id}/photos/{name}")
+def photo(user: User, drawing_id: str, name: str) -> FileResponse:
+    """The person's own uploaded photo, so the app can show it in the conversation."""
+    d = _load(user, drawing_id)
+    if name not in d.photos:
+        raise HTTPException(404, "no such photo")
+    return FileResponse(_user_dir(user) / d.id / name)

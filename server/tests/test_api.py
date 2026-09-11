@@ -50,6 +50,7 @@ def test_whoami_and_quota(client, code, tmp_path, monkeypatch):
     assert first.status_code == 200, first.text
     d = first.json()
     assert d["thread_id"] == "thr" and d["images"] == ["001.png"]
+    assert d["turns"][0]["images"] == ["001.png"] and d["turns"][0]["prompt"] == "red circle"
 
     img = client.get(f"/drawings/{d['id']}/images/001.png", headers=h)
     assert img.status_code == 200 and img.content == b"\x89PNG fake"
@@ -88,6 +89,15 @@ def test_photos_are_saved_and_handed_to_codex(client, code, tmp_path, monkeypatc
     assert r.status_code == 200, r.text
     assert r.json()["photos"] == ["in-001.jpg", "in-002.png", "in-003.jpg"]
     assert seen["thread_id"] == "thr" and seen["prompt"].startswith("Draw a picture")
+    # The conversation keeps each exchange apart; the empty prompt stays empty for display.
+    turns = r.json()["turns"]
+    assert [t["prompt"] for t in turns] == ["put this on my hand", ""]
+    assert turns[0]["photos"] == ["in-001.jpg", "in-002.png"] and turns[1]["photos"] == [
+        "in-003.jpg"
+    ]
+    assert turns[0]["text"] == "Pink wristband!"
+    p = client.get(f"/drawings/{d['id']}/photos/in-002.png", headers=h)
+    assert p.status_code == 200 and p.content == b"\x89PNG hand"
 
 
 def test_photo_limits(client, code, tmp_path, monkeypatch):
@@ -152,3 +162,12 @@ def test_downloads_off_hides_public_surface_only(client, code, monkeypatch):
     assert client.get("/app/version").status_code == 404
     assert client.get("/painting.jpg").status_code == 404
     assert client.get("/whoami", headers={"Authorization": f"Bearer {code}"}).status_code == 200
+
+
+def test_old_drawing_without_turns_is_shown_as_one(client, code, tmp_path):
+    meta = tmp_path / "drawings" / "elisa" / "abc" / "meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text('{"id":"abc","thread_id":"t","text":"A cat!","images":["001.png"]}')
+    d = client.get("/drawings", headers={"Authorization": f"Bearer {code}"}).json()[0]
+    assert len(d["turns"]) == 1 and d["turns"][0]["images"] == ["001.png"]
+    assert d["turns"][0]["text"] == "A cat!"
