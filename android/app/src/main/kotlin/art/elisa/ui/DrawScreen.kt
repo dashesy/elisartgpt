@@ -187,18 +187,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             update?.let { v -> item { UpdateBanner(v) { update = null } } }
-            if (d == null && p == null) {
-                // The button sends the sample's first request for real, so the thread
-                // starts the same way it just showed; no composer step in between.
-                sampleSession(
-                    onTry = {
-                        photos.clear()
-                        photos.addAll(Example.photos(ctx))
-                        prompt = Example.turns[0].prompt
-                        run(fresh = true) { api.newDrawing(prompt, it) }
-                    },
-                )
-            }
+            if (d == null && p == null) sampleSession()
             d?.turns?.forEach { t ->
                 if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) {
                     item { RequestBubble(t.prompt, t.photos.map { api.authed(api.photoUrl(d, it), ctx) }) }
@@ -469,7 +458,7 @@ private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
  * bubbles a real one uses. Two photos and a sentence, the picture that came
  * back, a follow-up, its picture. It teaches everything at once: photos are
  * a thing, you talk in your own words, and you can keep changing the picture.
- * "Draw this one for me" sends the first request for real.
+ * It ends by handing over to the composer; there is exactly one way to draw.
  */
 private object Example {
     class Sample(val prompt: String, val photos: List<String>, val result: Int, val reply: String)
@@ -489,13 +478,9 @@ private object Example {
             "حالا هر مهره یه ستاره‌ی زرد کوچولو داره! ⭐",
         ),
     )
-
-    // Resource URIs go through the same shrink-and-upload path as camera shots.
-    fun photos(ctx: android.content.Context): List<Uri> = turns[0].photos
-        .map { Uri.parse("android.resource://${ctx.packageName}/raw/$it") }
 }
 
-private fun LazyListScope.sampleSession(onTry: () -> Unit) {
+private fun LazyListScope.sampleSession() {
     item {
         Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
@@ -514,9 +499,11 @@ private fun LazyListScope.sampleSession(onTry: () -> Unit) {
         item { ReplyBubble(listOf(t.result), t.reply) }
     }
     item {
-        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-            Button(onClick = onTry) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw this one for me") }
-        }
+        Text(
+            "Your turn! Say it, type it, or add a photo 👇",
+            style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        )
     }
 }
 
