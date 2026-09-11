@@ -13,12 +13,22 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/** One exchange in a drawing: what was said and attached, what came back. */
+@Serializable
+data class Turn(
+    val prompt: String = "",
+    val photos: List<String> = emptyList(),
+    val images: List<String> = emptyList(),
+    val text: String = "",
+)
+
 @Serializable
 data class Drawing(
     val id: String,
     val text: String = "",
     val images: List<String> = emptyList(),
     val photos: List<String> = emptyList(),
+    val turns: List<Turn> = emptyList(),
     val error: String? = null,
 )
 
@@ -43,6 +53,11 @@ class Api(private val baseUrl: String, private val code: String) {
         .build()
 
     fun imageUrl(d: Drawing, name: String) = "$baseUrl/drawings/${d.id}/images/$name"
+    fun photoUrl(d: Drawing, name: String) = "$baseUrl/drawings/${d.id}/photos/$name"
+
+    /** A Coil request for one of our URLs, carrying the code like every other call. */
+    fun authed(url: String, ctx: android.content.Context) = coil.request.ImageRequest.Builder(ctx)
+        .data(url).addHeader("Authorization", authHeader).crossfade(true).build()
     val authHeader get() = "Bearer $code"
 
     suspend fun whoami(): Whoami = get("/whoami")

@@ -38,6 +38,10 @@ per drawing, so "make it blue" edits the same picture.
 
 - Secrets never enter the repo. Server config lives in `.env` (see `.env.example`);
   the ChatGPT credential lives only in `~/.codex/auth.json` on the VM.
+- The main screen is a chat per drawing: request bubbles (words + photo
+  thumbnails) on the right, pictures and the model's line on the left,
+  "Change it" appends to the same thread. The server records `turns` for this;
+  the flat `images`/`photos`/`text` fields remain for older app builds.
 - A request is words plus up to four photos. The app shrinks photos to 1280 px
   JPEG and posts multipart; plain JSON `{"prompt"}` still works for old builds.
   Photos are kept next to the drawing as `in-NNN.jpg`. How the model should
