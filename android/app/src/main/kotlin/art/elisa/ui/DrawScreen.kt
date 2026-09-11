@@ -22,6 +22,7 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import art.elisa.Speech
 import art.elisa.Store
+import art.elisa.Speaker
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -58,6 +59,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -135,6 +138,9 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     var update by remember { mutableStateOf<AppVersion?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf<Viewing?>(null) }
+    var speaking by remember { mutableStateOf(false) }
+    val speaker = remember { Speaker(ctx) { speaking = it } }
+    DisposableEffect(Unit) { onDispose { speaker.release() } }
     // A picture to land on when a thread opens from the gallery; consumed once.
     var scrollTo by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -247,7 +253,13 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) {
                     item { RequestBubble(t.prompt, t.photos.map { api.authed(api.photoUrl(d, it), ctx) }) }
                 }
-                item { ReplyBubble(api, d, t, onTap = { viewing = Viewing(d, it, fromGallery = false) }) }
+                item {
+                    ReplyBubble(
+                        api, d, t,
+                        onTap = { viewing = Viewing(d, it, fromGallery = false) },
+                        speaker = speaker, speaking = speaking,
+                    )
+                }
             }
             p?.let {
                 item { RequestBubble(it.prompt, it.photos) }
@@ -312,17 +324,21 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
             )
         }
         Spacer(Modifier.height(8.dp))
-        // A photo alone is a request too ("draw this"), so photos unlock the button like words do.
-        // One button: it continues the open thread, or starts one if the thread is empty.
+        // A photo alone is a request too ("draw this"), so photos unlock the buttons like words do.
+        // Both continue the open thread, or start one if the thread is empty; "Ask" wants words back.
         val ready = !busy && (prompt.isNotBlank() || photos.isNotEmpty())
-        Button(
-            onClick = {
-                if (d != null) run(fresh = false) { words, pics -> api.continueDrawing(d.id, words, pics) }
-                else run(fresh = true) { words, pics -> api.newDrawing(words, pics) }
-            },
-            enabled = ready,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
+        fun send(ask: Boolean) {
+            if (d != null) run(fresh = false) { words, pics -> api.continueDrawing(d.id, words, pics, ask) }
+            else run(fresh = true) { words, pics -> api.newDrawing(words, pics, ask) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { send(ask = true) }, enabled = ready, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.QuestionAnswer, null); Spacer(Modifier.size(6.dp)); Text("Ask")
+            }
+            Button(onClick = { send(ask = false) }, enabled = ready, modifier = Modifier.weight(2f)) {
+                Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!")
+            }
+        }
     }
 }
 
@@ -417,14 +433,37 @@ private fun RequestBubble(text: String, photos: List<Any>) {
 }
 
 @Composable
-private fun ReplyBubble(api: Api, d: Drawing, t: Turn, onTap: (String) -> Unit) {
+private fun ReplyBubble(api: Api, d: Drawing, t: Turn, onTap: (String) -> Unit, speaker: Speaker, speaking: Boolean) {
     val ctx = LocalContext.current
-    ReplyBubble(t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text, onTap = { onTap(t.images[it]) })
+    ReplyBubble(
+        t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text,
+        onTap = { onTap(t.images[it]) },
+        answer = t.kind == "ask", speaker = speaker, speaking = speaking,
+    )
 }
 
-/** The picture(s) that came back and the one-line reply, on the left. Tap a picture to open it. */
+/**
+ * What came back, on the left: pictures with a line under them, or, for a
+ * question, the answer as a chat bubble with a speaker to hear it read aloud.
+ */
 @Composable
-private fun ReplyBubble(images: List<Any>, text: String, onTap: ((Int) -> Unit)? = null) {
+private fun ReplyBubble(
+    images: List<Any>, text: String, onTap: ((Int) -> Unit)? = null,
+    answer: Boolean = false, speaker: Speaker? = null, speaking: Boolean = false,
+) {
+    if (answer) {
+        Row(Modifier.fillMaxWidth(0.92f), verticalAlignment = Alignment.Bottom) {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), modifier = Modifier.weight(1f, fill = false)) {
+                Text(text.ifBlank { "Hmm, I have no answer for that one." }, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp))
+            }
+            if (speaker != null && speaker.canSpeak(text)) {
+                IconButton(onClick = { if (speaking) speaker.stop() else speaker.speak(text) }) {
+                    Icon(if (speaking) Icons.Filled.Stop else Icons.Filled.VolumeUp, if (speaking) "Stop" else "Read it to me")
+                }
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth(0.92f)) {
         images.forEachIndexed { i, m ->
             AsyncImage(

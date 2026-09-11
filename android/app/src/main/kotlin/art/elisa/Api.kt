@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 @Serializable
 data class Turn(
     val prompt: String = "",
+    val kind: String = "draw",
     val photos: List<String> = emptyList(),
     val images: List<String> = emptyList(),
     val text: String = "",
@@ -40,7 +41,7 @@ data class Whoami(val name: String, val drawings_left_this_hour: Int)
 data class AppVersion(val versionCode: Int, val versionName: String, val url: String)
 
 @Serializable
-private data class PromptBody(val prompt: String)
+private data class PromptBody(val prompt: String, val mode: String = "draw")
 
 class ApiError(val status: Int, message: String) : IOException(message)
 
@@ -99,18 +100,20 @@ class Api(val baseUrl: String, private val code: String) {
             resp.body!!.bytes()
         }
     }
-    suspend fun newDrawing(prompt: String, photos: List<ByteArray> = emptyList()): Drawing =
-        post("/drawings", body(prompt, photos))
-    suspend fun continueDrawing(id: String, prompt: String, photos: List<ByteArray> = emptyList()): Drawing =
-        post("/drawings/$id/turns", body(prompt, photos))
+    /** [ask] sends a question to be answered in words instead of a picture. */
+    suspend fun newDrawing(prompt: String, photos: List<ByteArray> = emptyList(), ask: Boolean = false): Drawing =
+        post("/drawings", body(prompt, photos, ask))
+    suspend fun continueDrawing(id: String, prompt: String, photos: List<ByteArray> = emptyList(), ask: Boolean = false): Drawing =
+        post("/drawings/$id/turns", body(prompt, photos, ask))
 
     /** JSON when there is only text (what the server always accepted), multipart with photos. */
-    private fun body(prompt: String, photos: List<ByteArray>): RequestBody {
+    private fun body(prompt: String, photos: List<ByteArray>, ask: Boolean): RequestBody {
+        val mode = if (ask) "ask" else "draw"
         if (photos.isEmpty()) {
-            return json.encodeToString(PromptBody.serializer(), PromptBody(prompt))
+            return json.encodeToString(PromptBody.serializer(), PromptBody(prompt, mode))
                 .toRequestBody("application/json".toMediaType())
         }
-        val b = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("prompt", prompt)
+        val b = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("prompt", prompt).addFormDataPart("mode", mode)
         photos.forEachIndexed { i, bytes ->
             b.addFormDataPart("photos", "photo-$i.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
         }
