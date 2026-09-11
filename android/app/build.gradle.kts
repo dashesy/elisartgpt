@@ -27,6 +27,7 @@ android {
 
     defaultConfig {
         applicationId = "art.elisa"
+        // ImageDecoder (photo downscaling with EXIF rotation) arrived in 28 / Android 9.
         minSdk = 26
         targetSdk = 35
         // Monotonic from git so `make publish` never needs a manual bump; the
@@ -62,6 +63,10 @@ android {
         compose = true
         buildConfig = true
     }
+    // Keep the dex deflated inside the APK. AGP stores it uncompressed once
+    // minSdk reaches 28, which turns the 12 MB download into 45 MB; pin the
+    // behavior so a future minSdk bump cannot do that silently.
+    packaging { dex { useLegacyPackaging = true } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -85,6 +90,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Camera JPEGs carry their rotation in EXIF; without this a sideways hand gets uploaded.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

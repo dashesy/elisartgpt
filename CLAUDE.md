@@ -31,6 +31,10 @@ per drawing, so "make it blue" edits the same picture.
 
 - Secrets never enter the repo. Server config lives in `.env` (see `.env.example`);
   the ChatGPT credential lives only in `~/.codex/auth.json` on the VM.
+- A request is words plus up to four photos. The app shrinks photos to 1280 px
+  JPEG and posts multipart; plain JSON `{"prompt"}` still works for old builds.
+  Photos are kept next to the drawing as `in-NNN.jpg`. How the model should
+  read them lives in `server/elisart/workspace_agents.md`, not in code.
 - People authenticate with an invite code (`make code NAME=elisa`), sent as a
   bearer token and stored hashed in `data/codes.json`. Each code owns its own
   gallery and hourly quota. The app ships with the server URL and asks only
@@ -39,7 +43,9 @@ per drawing, so "make it blue" edits the same picture.
 - `make help` lists every task. Tests and lint run through the Makefile
   (`make test`, `make lint`; CI runs the same two via `mise-action`).
 - `make apk` needs the Android SDK at `~/Library/Android/sdk`; the JDK comes
-  from mise. `make smoke` draws for real and spends the ChatGPT plan.
+  from mise. The APK should be ~12 MB; 45 MB means the dex went in uncompressed
+  (see `packaging` in `android/app/build.gradle.kts`). `make smoke` draws for
+  real and spends the ChatGPT plan; it takes a prompt and photo paths too.
 - Comment the *why*, never the *what*.
 
 ## The VM
@@ -86,5 +92,8 @@ Gradle/adb tooling needs `JAVA_HOME` (`mise where java`); and a fresh AVD has
   `$CODEX_HOME/generated_images/<thread_id>/`.
 - `codex exec resume <thread_id> "<prompt>"` continues a thread; do not pass
   `--ephemeral` or the thread is not persisted.
+- Reference photos go in with `-i <file>` (repeatable, works on `resume` too);
+  the prompt follows `--` because `-i` is variadic. `image_gen` uses them as
+  input, so "put this wristband on my hand" with two photos really composites.
 - Login on a headless box: `codex login --device-auth` (enable device code login
   in ChatGPT security settings first).

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke deploy downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
 
 SERVER := server
 # Gradle needs a JDK; resolve mise's pin even from a shell without `mise activate`.
@@ -39,6 +39,11 @@ PUBLIC_URL := https://EXAMPLE.sslip.io
 define vm_restart
 	ssh $(VM) 'cd $(VM_REPO) && sudo systemctl restart elisart@$$USER && for i in $$(seq 20); do curl -sf 127.0.0.1:8787/health >/dev/null && break; sleep 0.5; done'
 endef
+
+deploy: ## VM: pull main, sync deps, restart the API
+	ssh $(VM) 'cd $(VM_REPO) && git pull --ff-only && (cd server && ~/.local/bin/mise exec -- uv sync -q)'
+	$(vm_restart)
+	@ssh $(VM) 'cd $(VM_REPO) && git log --oneline -1'
 
 downloads-on: ## VM: expose the download page + APK
 	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=true/" .env'

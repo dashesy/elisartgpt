@@ -6,9 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+
+# Parsed forms yield Starlette's class, not FastAPI's subclass, so check for this one.
+from starlette.datastructures import UploadFile
 
 from elisart import codex
 from elisart.codes import Codes
@@ -43,11 +46,20 @@ class Prompt(BaseModel):
     prompt: str
 
 
+# Photos a person attaches to a request. Phones downscale before uploading, so
+# these caps only stop mistakes; the real cost is the model looking at them.
+MAX_PHOTOS = 4
+MAX_PHOTO_BYTES = 8 * 1024 * 1024
+PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
 class Drawing(BaseModel):
     id: str
     thread_id: str | None
     text: str
     images: list[str]
+    # Uploaded reference photos, in the order they were attached across turns.
+    photos: list[str] = []
     error: str | None = None
 
 
@@ -176,22 +188,59 @@ def list_drawings(user: User) -> list[Drawing]:
     return sorted(items, key=lambda d: _meta_path(user, d.id).stat().st_mtime, reverse=True)
 
 
-async def _turn(user: str, d: Drawing, prompt: str) -> Drawing:
+async def _read_request(request: Request) -> tuple[str, list[UploadFile]]:
+    """A request is JSON (`{"prompt"}`, what older phones send) or a form with a
+    `prompt` field and up to MAX_PHOTOS `photos` files."""
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            return Prompt.model_validate_json(await request.body()).prompt, []
+        except ValidationError as e:
+            raise HTTPException(422, "bad request body") from e
+    form = await request.form()
+    photos = [f for f in form.getlist("photos") if isinstance(f, UploadFile)]
+    if len(photos) > MAX_PHOTOS:
+        raise HTTPException(413, f"at most {MAX_PHOTOS} photos per request")
+    for f in photos:
+        if f.content_type not in PHOTO_TYPES:
+            raise HTTPException(415, "photos must be JPEG, PNG or WebP")
+        if f.size is not None and f.size > MAX_PHOTO_BYTES:
+            raise HTTPException(413, "that photo is too big")
+    prompt = str(form.get("prompt", "")).strip()
+    if not prompt and not photos:
+        raise HTTPException(422, "say what to draw, or add a photo")
+    # A photo with no words is a complete request; give the model something to answer.
+    return prompt or "Draw a picture from these photos.", photos
+
+
+async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[Path]:
+    dest = _user_dir(user) / d.id
+    dest.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for f in photos:
+        name = f"in-{len(d.photos) + 1:03d}.{PHOTO_TYPES[f.content_type or '']}"
+        (dest / name).write_bytes(await f.read())
+        d.photos.append(name)
+        paths.append(dest / name)
+    return paths
+
+
+async def _turn(user: str, d: Drawing, prompt: str, photos: list[UploadFile]) -> Drawing:
     if _turns_last_hour(user) >= settings.rate_limit_per_hour:
         raise HTTPException(429, "that's enough drawings for this hour, try again later")
     _record_turn(user)
+    photo_paths = await _save_photos(user, d, photos)
     result = await codex.run_turn(
         prompt,
         workspace=settings.workspace_dir,
         codex_home=settings.codex_home,
         codex_bin=settings.codex_bin,
         thread_id=d.thread_id,
+        images=photo_paths,
     )
     d.thread_id = result.thread_id
     d.text = result.text
     d.error = result.error
     dest = _user_dir(user) / d.id
-    dest.mkdir(parents=True, exist_ok=True)
     for src in result.images:
         name = f"{len(d.images) + 1:03d}.png"
         shutil.copy2(src, dest / name)
@@ -203,14 +252,16 @@ async def _turn(user: str, d: Drawing, prompt: str) -> Drawing:
 
 
 @app.post("/drawings")
-async def new_drawing(user: User, body: Prompt) -> Drawing:
+async def new_drawing(user: User, request: Request) -> Drawing:
+    prompt, photos = await _read_request(request)
     d = Drawing(id=uuid.uuid4().hex[:12], thread_id=None, text="", images=[])
-    return await _turn(user, d, body.prompt)
+    return await _turn(user, d, prompt, photos)
 
 
 @app.post("/drawings/{drawing_id}/turns")
-async def continue_drawing(user: User, drawing_id: str, body: Prompt) -> Drawing:
-    return await _turn(user, _load(user, drawing_id), body.prompt)
+async def continue_drawing(user: User, drawing_id: str, request: Request) -> Drawing:
+    prompt, photos = await _read_request(request)
+    return await _turn(user, _load(user, drawing_id), prompt, photos)
 
 
 @app.get("/drawings/{drawing_id}/images/{name}")

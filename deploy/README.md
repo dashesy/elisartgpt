@@ -15,5 +15,5 @@ localhost behind it. Ports 22, 80 and 443 are open in the VM's NSG.
 
 Check: `curl https://EXAMPLE.sslip.io/health`.
 
-Publish a new app build: `make apk` locally, then
-`scp android/app/build/outputs/apk/release/elisart.apk elisart:elisartgpt/data/app/`.
+Ship server changes: `make deploy` (pull, `uv sync`, restart, wait for
+`/health`). Publish a new app build: `make publish`.

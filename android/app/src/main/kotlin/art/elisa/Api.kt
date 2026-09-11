@@ -5,8 +5,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -16,6 +18,7 @@ data class Drawing(
     val id: String,
     val text: String = "",
     val images: List<String> = emptyList(),
+    val photos: List<String> = emptyList(),
     val error: String? = null,
 )
 
@@ -45,20 +48,29 @@ class Api(private val baseUrl: String, private val code: String) {
     suspend fun whoami(): Whoami = get("/whoami")
     suspend fun appVersion(): AppVersion = get("/app/version")
     suspend fun drawings(): List<Drawing> = get("/drawings")
-    suspend fun newDrawing(prompt: String): Drawing = post("/drawings", PromptBody(prompt))
-    suspend fun continueDrawing(id: String, prompt: String): Drawing =
-        post("/drawings/$id/turns", PromptBody(prompt))
+    suspend fun newDrawing(prompt: String, photos: List<ByteArray> = emptyList()): Drawing =
+        post("/drawings", body(prompt, photos))
+    suspend fun continueDrawing(id: String, prompt: String, photos: List<ByteArray> = emptyList()): Drawing =
+        post("/drawings/$id/turns", body(prompt, photos))
+
+    /** JSON when there is only text (what the server always accepted), multipart with photos. */
+    private fun body(prompt: String, photos: List<ByteArray>): RequestBody {
+        if (photos.isEmpty()) {
+            return json.encodeToString(PromptBody.serializer(), PromptBody(prompt))
+                .toRequestBody("application/json".toMediaType())
+        }
+        val b = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("prompt", prompt)
+        photos.forEachIndexed { i, bytes ->
+            b.addFormDataPart("photos", "photo-$i.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
+        }
+        return b.build()
+    }
 
     private suspend inline fun <reified T> get(path: String): T =
         exec(Request.Builder().url(baseUrl + path).header("Authorization", authHeader).build())
 
-    private suspend inline fun <reified T> post(path: String, body: PromptBody): T {
-        val payload = json.encodeToString(PromptBody.serializer(), body)
-            .toRequestBody("application/json".toMediaType())
-        return exec(
-            Request.Builder().url(baseUrl + path).header("Authorization", authHeader).post(payload).build()
-        )
-    }
+    private suspend inline fun <reified T> post(path: String, payload: RequestBody): T =
+        exec(Request.Builder().url(baseUrl + path).header("Authorization", authHeader).post(payload).build())
 
     private suspend inline fun <reified T> exec(req: Request): T = withContext(Dispatchers.IO) {
         client.newCall(req).execute().use { resp ->

@@ -50,6 +50,24 @@ def _pngs(directory: Path) -> set[Path]:
     return set(directory.glob("*.png")) if directory.is_dir() else set()
 
 
+def build_argv(
+    prompt: str,
+    *,
+    workspace: Path,
+    codex_bin: str,
+    thread_id: str | None,
+    images: list[Path],
+) -> list[str]:
+    argv = [codex_bin, "exec", "--json", "--skip-git-repo-check", "-s", "workspace-write"]
+    # `-C` is resolved by codex against its own cwd, which is also this dir, so absolute.
+    argv += ["resume", thread_id] if thread_id else ["-C", str(workspace.resolve())]
+    # `-i` is variadic: one flag per file, and `--` so the prompt is never taken for a path.
+    for img in images:
+        argv += ["-i", str(img.resolve())]
+    argv += ["--", prompt]
+    return argv
+
+
 async def run_turn(
     prompt: str,
     *,
@@ -57,17 +75,16 @@ async def run_turn(
     codex_home: Path,
     codex_bin: str = "codex",
     thread_id: str | None = None,
+    images: list[Path] | None = None,
     timeout: float = 300,
 ) -> TurnResult:
-    """Run one turn. Pass thread_id to continue an existing drawing."""
-    # Absolute: `-C` is resolved by codex against its own cwd, which is also this dir.
+    """Run one turn. Pass thread_id to continue an existing drawing; `images` are
+    the user's photos, attached to the prompt so the model can draw from them."""
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    argv = [codex_bin, "exec", "--json", "--skip-git-repo-check", "-s", "workspace-write"]
-    if thread_id:
-        argv += ["resume", thread_id, prompt]
-    else:
-        argv += ["-C", str(workspace), prompt]
+    argv = build_argv(
+        prompt, workspace=workspace, codex_bin=codex_bin, thread_id=thread_id, images=images or []
+    )
 
     gen_root = codex_home / "generated_images"
     before = _pngs(gen_root / thread_id) if thread_id else set()

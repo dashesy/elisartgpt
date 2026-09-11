@@ -62,6 +62,52 @@ def test_whoami_and_quota(client, code, tmp_path, monkeypatch):
     assert (tmp_path / "workspace" / "AGENTS.md").exists()
 
 
+def test_photos_are_saved_and_handed_to_codex(client, code, tmp_path, monkeypatch):
+    seen = {}
+
+    async def fake_run_turn(prompt, **kw):
+        seen.update(prompt=prompt, images=kw["images"], thread_id=kw["thread_id"])
+        return TurnResult(thread_id="thr", text="Pink wristband!", images=[])
+
+    monkeypatch.setattr(codex, "run_turn", fake_run_turn)
+    h = {"Authorization": f"Bearer {code}"}
+    files = [
+        ("photos", ("band.jpg", b"\xff\xd8 band", "image/jpeg")),
+        ("photos", ("hand.png", b"\x89PNG hand", "image/png")),
+    ]
+    r = client.post("/drawings", data={"prompt": "put this on my hand"}, files=files, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["photos"] == ["in-001.jpg", "in-002.png"]
+    assert seen["prompt"] == "put this on my hand"
+    assert [p.name for p in seen["images"]] == ["in-001.jpg", "in-002.png"]
+    assert seen["images"][1].read_bytes() == b"\x89PNG hand"
+
+    # A follow-up with one more photo continues the numbering and the thread.
+    r = client.post(f"/drawings/{d['id']}/turns", data={"prompt": ""}, files=files[:1], headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["photos"] == ["in-001.jpg", "in-002.png", "in-003.jpg"]
+    assert seen["thread_id"] == "thr" and seen["prompt"].startswith("Draw a picture")
+
+
+def test_photo_limits(client, code, tmp_path, monkeypatch):
+    (tmp_path / "gen.png").write_bytes(b"png")
+    monkeypatch.setattr(codex, "run_turn", _fake_turn(tmp_path / "gen.png"))
+    h = {"Authorization": f"Bearer {code}"}
+    jpg = ("photos", ("a.jpg", b"x", "image/jpeg"))
+    assert (
+        client.post("/drawings", data={"prompt": "x"}, files=[jpg] * 5, headers=h).status_code
+        == 413
+    )
+    gif = ("photos", ("a.gif", b"x", "image/gif"))
+    assert client.post("/drawings", data={"prompt": "x"}, files=[gif], headers=h).status_code == 415
+    assert client.post("/drawings", data={"prompt": "  "}, headers=h).status_code == 422
+    assert (
+        client.post("/drawings", json={"prompt": "no photos, old app"}, headers=h).status_code
+        == 200
+    )
+
+
 def test_galleries_are_per_person(client, code, tmp_path, monkeypatch):
     png = tmp_path / "gen.png"
     png.write_bytes(b"png")

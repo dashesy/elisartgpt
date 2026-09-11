@@ -7,6 +7,8 @@ dependencies = [
     "fastapi>=0.120",
     "uvicorn[standard]>=0.35",
     "pydantic-settings>=2.8",
+    # Photo uploads arrive as multipart/form-data.
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

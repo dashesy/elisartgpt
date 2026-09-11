@@ -1,6 +1,10 @@
 package art.elisa.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,8 +27,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Button
@@ -61,19 +69,24 @@ import art.elisa.Api
 import art.elisa.AppVersion
 import art.elisa.BuildConfig
 import art.elisa.Drawing
+import art.elisa.Photos
 import art.elisa.Whoami
 import kotlinx.coroutines.launch
 
 /**
  * The whole app after pairing: a prompt box, the current picture, a "change it"
- * box that continues the same drawing, and a gallery of past drawings.
+ * box that continues the same drawing, and a gallery of past drawings. Photos
+ * attach to whatever is typed, so "put this on my hand" with two photos works
+ * the same way as plain words.
  */
 @Composable
 fun DrawScreen(api: Api, onForget: () -> Unit) {
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val gallery = remember { mutableStateListOf<Drawing>() }
     var current by remember { mutableStateOf<Drawing?>(null) }
     var prompt by remember { mutableStateOf("") }
+    val photos = remember { mutableStateListOf<Uri>() }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showGallery by remember { mutableStateOf(false) }
@@ -90,16 +103,19 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
             ?.let { update = it }
     }
 
-    fun run(block: suspend () -> Drawing) {
+    // Photos are shrunk right before sending: picking is instant, the wait happens
+    // under the spinner where a wait is expected anyway.
+    fun run(block: suspend (List<ByteArray>) -> Drawing) {
         if (busy) return
         busy = true; error = null
         scope.launch {
             try {
-                val d = block()
+                val d = block(photos.map { Photos.shrink(ctx, it) })
                 current = d
                 gallery.removeAll { it.id == d.id }
                 gallery.add(0, d)
                 prompt = ""
+                photos.clear()
             } catch (e: Exception) {
                 error = e.message ?: "Something went wrong."
             } finally {
@@ -140,10 +156,14 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                     busy -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(12.dp))
-                        Text("Drawing… this takes about a minute")
+                        Text(if (photos.isEmpty()) "Drawing… this takes about a minute" else "Looking at your photos and drawing… about a minute")
                     }
                     d != null && d.images.isNotEmpty() -> Picture(api, d, d.images.last(), Modifier.fillMaxSize())
-                    else -> Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
+                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Tell me, or add a photo to draw on", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
             current?.text?.takeIf { it.isNotBlank() && !busy }?.let {
@@ -157,37 +177,103 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         }
 
         Spacer(Modifier.height(8.dp))
+        PhotoStrip(photos, enabled = !busy)
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = prompt,
             onValueChange = { prompt = it },
-            placeholder = { Text(if (current == null) "A purple dragon eating ice cream" else "Change it… make the sky pink") },
+            placeholder = {
+                Text(
+                    when {
+                        photos.isNotEmpty() -> "Put this on my hand and make it pink"
+                        current == null -> "A purple dragon eating ice cream"
+                        else -> "Change it… make the sky pink"
+                    },
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 4,
             enabled = !busy,
         )
         Spacer(Modifier.height(8.dp))
+        // A photo alone is a request too ("draw this"), so photos unlock the button like words do.
+        val ready = !busy && (prompt.isNotBlank() || photos.isNotEmpty())
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val cur = current
             if (cur != null) {
                 Button(
-                    onClick = { run { api.continueDrawing(cur.id, prompt) } },
-                    enabled = !busy && prompt.isNotBlank(),
+                    onClick = { run { api.continueDrawing(cur.id, prompt, it) } },
+                    enabled = ready,
                     modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Change it") }
                 OutlinedButton(
-                    onClick = { run { api.newDrawing(prompt) } },
-                    enabled = !busy && prompt.isNotBlank(),
+                    onClick = { run { api.newDrawing(prompt, it) } },
+                    enabled = ready,
                     modifier = Modifier.weight(1f),
                 ) { Text("New drawing") }
             } else {
                 Button(
-                    onClick = { run { api.newDrawing(prompt) } },
-                    enabled = !busy && prompt.isNotBlank(),
+                    onClick = { run { api.newDrawing(prompt, it) } },
+                    enabled = ready,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
             }
         }
+    }
+}
+
+/**
+ * Attached photos as thumbnails, each with a remove badge, followed by the two
+ * ways to add one. The chips stay visible with words on them, not just icons:
+ * that is how a kid finds out photos are a thing at all.
+ */
+@Composable
+private fun PhotoStrip(photos: MutableList<Uri>, enabled: Boolean) {
+    val ctx = LocalContext.current
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Photos.MAX)) { uris ->
+        photos.addAll(uris.take(Photos.MAX - photos.size))
+    }
+    // The camera writes into a URI we hand it; remember which one so the result can be matched.
+    var shot by remember { mutableStateOf<Uri?>(null) }
+    val take = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) shot?.let { photos.add(it) }
+    }
+    val canAdd = enabled && photos.size < Photos.MAX
+
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        photos.forEach { uri ->
+            Box(Modifier.size(56.dp)) {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = "Attached photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                )
+                Icon(
+                    Icons.Filled.Close, "Remove photo",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.align(Alignment.TopEnd).size(18.dp).clip(RoundedCornerShape(9.dp))
+                        .background(MaterialTheme.colorScheme.primary).clickable(enabled) { photos.remove(uri) },
+                )
+            }
+        }
+        AssistChip(
+            onClick = { shot = Photos.newShot(ctx).also { take.launch(it) } },
+            enabled = canAdd,
+            label = { Text("Take a photo") },
+            leadingIcon = { Icon(Icons.Filled.PhotoCamera, null, Modifier.size(18.dp)) },
+        )
+        AssistChip(
+            onClick = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            enabled = canAdd,
+            label = { Text("Add a photo") },
+            leadingIcon = { Icon(Icons.Filled.PhotoLibrary, null, Modifier.size(18.dp)) },
+        )
     }
 }
 
