@@ -222,11 +222,12 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 placeholder = {
                     Text(
                         when {
-                            // Example sentences in the kid's own words, so the hint is something she could say.
+                            // Example sentences in the kid's own words, and in the sample's own
+                            // story: the empty thread shows wristbands, so the hint asks for one.
                             listening -> "Listening…"
                             photos.isNotEmpty() -> "این رو بذار روی دستم و صورتیش کن"
-                            d == null && p == null -> "یه اژدهای بنفش که بستنی می‌خوره"
-                            else -> "آسمونش رو صورتی کن"
+                            d == null && p == null -> "حالا یه دستبند آبی با ستاره‌های زرد برام بکش"
+                            else -> "مهره‌هاش رو قرمز کن"
                         },
                     )
                 },
