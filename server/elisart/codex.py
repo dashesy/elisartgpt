@@ -8,7 +8,9 @@ before and after the turn.
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 
@@ -44,6 +46,61 @@ def parse_events(lines: list[str], result: TurnResult | None = None) -> TurnResu
             err = ev.get("error", {}).get("message") if kind == "turn.failed" else ev.get("message")
             result.error = err or kind
     return result
+
+
+@dataclass
+class LoggedTurn:
+    prompt: str
+    photos: list[str]
+    text: str
+    at: float
+
+
+def _rollout(codex_home: Path, thread_id: str) -> Path | None:
+    hits = sorted((codex_home / "sessions").glob(f"*/*/*/rollout-*-{thread_id}.jsonl"))
+    return hits[-1] if hits else None
+
+
+def thread_turns(codex_home: Path, thread_id: str) -> list[LoggedTurn]:
+    """Recover the conversation from codex's own session log: each real user
+    message (not the AGENTS.md / environment blobs codex injects, which start
+    with `#` or `<`) opens a turn, `<image path=...>` items name its photos, and
+    the following assistant message is its reply. Used for drawings saved
+    before turns were recorded."""
+    path = _rollout(codex_home, thread_id)
+    if path is None:
+        return []
+    turns: list[LoggedTurn] = []
+    for raw in path.read_text(errors="replace").splitlines():
+        try:
+            ev = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        msg = ev.get("payload") or {}
+        if ev.get("type") != "response_item" or msg.get("type") != "message":
+            continue
+        texts = [c.get("text", "") for c in msg.get("content") or [] if isinstance(c, dict)]
+        if msg.get("role") == "user":
+            photos = [
+                Path(m.group(1)).name
+                for t in texts
+                for m in re.finditer(r'<image [^>]*path="([^"]+)"', t)
+            ]
+            prompt = next(
+                (t for t in texts if t.strip() and not t.lstrip().startswith(("<", "#"))), None
+            )
+            if prompt is None and not photos:
+                continue
+            try:
+                at = datetime.fromisoformat(
+                    ev.get("timestamp", "").replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                at = 0.0
+            turns.append(LoggedTurn(prompt=(prompt or "").strip(), photos=photos, text="", at=at))
+        elif msg.get("role") == "assistant" and turns:
+            turns[-1].text = "\n".join(t for t in texts if t.strip()).strip()
+    return turns
 
 
 def _pngs(directory: Path) -> set[Path]:

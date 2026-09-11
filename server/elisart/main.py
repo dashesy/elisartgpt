@@ -102,9 +102,30 @@ def _load(user: str, drawing_id: str) -> Drawing:
         raise HTTPException(404, "no such drawing")
     d = Drawing.model_validate_json(path.read_text())
     if not d.turns and d.images:
-        # Drawings from before turns were recorded: show them as one exchange.
-        d.turns = [Turn(prompt="", images=d.images, text=d.text, at=path.stat().st_mtime)]
+        d.turns = _backfill_turns(d, path.stat().st_mtime)
+        _save(user, d)
     return d
+
+
+def _backfill_turns(d: Drawing, mtime: float) -> list[Turn]:
+    """Drawings saved before turns were recorded: rebuild the exchanges from
+    codex's session log, or failing that show the pictures as one exchange."""
+    logged = codex.thread_turns(settings.codex_home, d.thread_id) if d.thread_id else []
+    if not logged:
+        return [Turn(prompt="", images=d.images, text=d.text, at=mtime)]
+    turns = [
+        Turn(
+            prompt=t.prompt,
+            photos=[p for p in t.photos if p in d.photos],
+            text=t.text,
+            at=t.at or mtime,
+        )
+        for t in logged
+    ]
+    # One picture per turn is the norm; anything left over belongs to the last one.
+    for i, name in enumerate(d.images):
+        turns[min(i, len(turns) - 1)].images.append(name)
+    return turns
 
 
 def _save(user: str, d: Drawing) -> None:

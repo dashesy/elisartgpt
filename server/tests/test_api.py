@@ -164,10 +164,35 @@ def test_downloads_off_hides_public_surface_only(client, code, monkeypatch):
     assert client.get("/whoami", headers={"Authorization": f"Bearer {code}"}).status_code == 200
 
 
-def test_old_drawing_without_turns_is_shown_as_one(client, code, tmp_path):
+def test_old_drawing_without_turns_is_shown_as_one(client, code, tmp_path, monkeypatch):
+    monkeypatch.setattr(main.settings, "codex_home", tmp_path / "codex")
     meta = tmp_path / "drawings" / "elisa" / "abc" / "meta.json"
     meta.parent.mkdir(parents=True)
     meta.write_text('{"id":"abc","thread_id":"t","text":"A cat!","images":["001.png"]}')
     d = client.get("/drawings", headers={"Authorization": f"Bearer {code}"}).json()[0]
     assert len(d["turns"]) == 1 and d["turns"][0]["images"] == ["001.png"]
     assert d["turns"][0]["text"] == "A cat!"
+
+
+def test_old_drawing_is_backfilled_from_codex_log(client, code, tmp_path, monkeypatch):
+    monkeypatch.setattr(main.settings, "codex_home", tmp_path / "codex")
+    thread = "01a08e7e-3fbf-70b0-bb05-372758da728c"
+    day = tmp_path / "codex" / "sessions" / "2026" / "09" / "11"
+    day.mkdir(parents=True)
+    (day / f"rollout-x-{thread}.jsonl").write_bytes(
+        (Path(__file__).with_name("rollout_fixture.jsonl")).read_bytes()
+    )
+    meta = tmp_path / "drawings" / "elisa" / "abc" / "meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        f'{{"id":"abc","thread_id":"{thread}","text":"stars","images":["001.png","002.png"],'
+        '"photos":["in-001.jpg","in-002.jpg"]}'
+    )
+    h = {"Authorization": f"Bearer {code}"}
+    turns = client.get("/drawings", headers=h).json()[0]["turns"]
+    assert [t["images"] for t in turns] == [["001.png"], ["002.png"]]
+    assert turns[0]["photos"] == ["in-001.jpg", "in-002.jpg"] and turns[0]["prompt"].startswith(
+        "این"
+    )
+    # Backfilled once, then stored: the meta file now carries the turns.
+    assert '"turns"' in meta.read_text() and "star" in meta.read_text()
