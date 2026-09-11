@@ -219,3 +219,25 @@ def test_delete_drawing(client, code, tmp_path, monkeypatch):
     assert client.get("/drawings", headers=h).json() == []
     assert not (tmp_path / "drawings" / "elisa" / d["id"]).exists()
     assert client.delete(f"/drawings/{d['id']}", headers=h).status_code == 404
+
+
+def test_ask_is_answered_in_words(client, code, tmp_path, monkeypatch):
+    seen = {}
+
+    async def fake_run_turn(prompt, **kw):
+        seen["prompt"] = prompt
+        return TurnResult(thread_id="thr", text="Cats have whiskers to feel their way!", images=[])
+
+    monkeypatch.setattr(codex, "run_turn", fake_run_turn)
+    h = {"Authorization": f"Bearer {code}"}
+    r = client.post(
+        "/drawings", json={"prompt": "why do cats have whiskers?", "mode": "ask"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    t = r.json()["turns"][0]
+    assert t["kind"] == "ask" and t["prompt"] == "why do cats have whiskers?" and t["images"] == []
+    assert "whiskers" in t["text"]
+    assert seen["prompt"].startswith("why do cats") and seen["prompt"].endswith("No picture.]")
+    # Old builds send no mode and get a drawing turn with a clean prompt.
+    client.post("/drawings", json={"prompt": "a cat"}, headers=h)
+    assert seen["prompt"] == "a cat"

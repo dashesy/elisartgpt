@@ -45,6 +45,8 @@ User = Annotated[str, Depends(current_user)]
 
 class Prompt(BaseModel):
     prompt: str
+    # "draw" (default) or "ask": a question answered in words, no picture.
+    mode: str = "draw"
 
 
 # Photos a person attaches to a request. Phones downscale before uploading, so
@@ -58,6 +60,7 @@ class Turn(BaseModel):
     """One exchange: what the person said and attached, what came back."""
 
     prompt: str
+    kind: str = "draw"
     photos: list[str] = []
     images: list[str] = []
     text: str = ""
@@ -240,17 +243,18 @@ def list_drawings(user: User) -> list[Drawing]:
     return sorted(items, key=lambda d: _meta_path(user, d.id).stat().st_mtime, reverse=True)
 
 
-async def _read_request(request: Request) -> tuple[str, list[UploadFile]]:
-    """A request is JSON (`{"prompt"}`, what older phones send) or a form with a
-    `prompt` field and up to MAX_PHOTOS `photos` files."""
+async def _read_request(request: Request) -> tuple[str, list[UploadFile], bool]:
+    """A request is JSON (`{"prompt", "mode"}`, what older phones send without
+    mode) or a form with `prompt`, optional `mode` and up to MAX_PHOTOS `photos`.
+    Returns the words, the photos and whether it is a question rather than a drawing."""
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
-            prompt = Prompt.model_validate_json(await request.body()).prompt.strip()
+            body = Prompt.model_validate_json(await request.body())
         except ValidationError as e:
             raise HTTPException(422, "bad request body") from e
-        if not prompt:
+        if not body.prompt.strip():
             raise HTTPException(422, "say what to draw, or add a photo")
-        return prompt, []
+        return body.prompt.strip(), [], body.mode == "ask"
     form = await request.form()
     photos = [f for f in form.getlist("photos") if isinstance(f, UploadFile)]
     if len(photos) > MAX_PHOTOS:
@@ -263,7 +267,7 @@ async def _read_request(request: Request) -> tuple[str, list[UploadFile]]:
     prompt = str(form.get("prompt", "")).strip()
     if not prompt and not photos:
         raise HTTPException(422, "say what to draw, or add a photo")
-    return prompt, photos
+    return prompt, photos, form.get("mode") == "ask"
 
 
 async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[Path]:
@@ -278,15 +282,30 @@ async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[
     return paths
 
 
-async def _turn(user: str, d: Drawing, prompt: str, photos: list[UploadFile]) -> Drawing:
+# Appended to a question so the model, whose standing orders are to draw, answers
+# in words this once. The stored turn keeps the words as typed.
+ASK_MARKER = "\n\n[Just answer in words this time. No picture.]"
+
+
+async def _turn(
+    user: str, d: Drawing, prompt: str, photos: list[UploadFile], ask: bool = False
+) -> Drawing:
     if _turns_last_hour(user) >= settings.rate_limit_per_hour:
         raise HTTPException(429, "that's enough drawings for this hour, try again later")
     _record_turn(user)
     photo_paths = await _save_photos(user, d, photos)
-    turn = Turn(prompt=prompt, photos=[p.name for p in photo_paths], at=time.time())
+    turn = Turn(
+        prompt=prompt,
+        kind="ask" if ask else "draw",
+        photos=[p.name for p in photo_paths],
+        at=time.time(),
+    )
+    # A photo with no words is a complete request; give the model something to answer.
+    words = prompt or (
+        "Tell me about these photos." if ask else "Draw a picture from these photos."
+    )
     result = await codex.run_turn(
-        # A photo with no words is a complete request; give the model something to answer.
-        prompt or "Draw a picture from these photos.",
+        words + (ASK_MARKER if ask else ""),
         workspace=settings.workspace_dir,
         codex_home=settings.codex_home,
         codex_bin=settings.codex_bin,
@@ -305,22 +324,22 @@ async def _turn(user: str, d: Drawing, prompt: str, photos: list[UploadFile]) ->
     turn.text = result.text
     d.turns.append(turn)
     _save(user, d)
-    if d.error and not result.images:
+    if d.error and not result.images and not (ask and result.text):
         raise HTTPException(502, d.error)
     return d
 
 
 @app.post("/drawings")
 async def new_drawing(user: User, request: Request) -> Drawing:
-    prompt, photos = await _read_request(request)
+    prompt, photos, ask = await _read_request(request)
     d = Drawing(id=uuid.uuid4().hex[:12], thread_id=None, text="", images=[])
-    return await _turn(user, d, prompt, photos)
+    return await _turn(user, d, prompt, photos, ask)
 
 
 @app.post("/drawings/{drawing_id}/turns")
 async def continue_drawing(user: User, drawing_id: str, request: Request) -> Drawing:
-    prompt, photos = await _read_request(request)
-    return await _turn(user, _load(user, drawing_id), prompt, photos)
+    prompt, photos, ask = await _read_request(request)
+    return await _turn(user, _load(user, drawing_id), prompt, photos, ask)
 
 
 @app.delete("/drawings/{drawing_id}", status_code=204)
