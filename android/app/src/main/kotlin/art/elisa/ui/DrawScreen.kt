@@ -458,7 +458,7 @@ private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
  * bubbles a real one uses. Two photos and a sentence, the picture that came
  * back, a follow-up, its picture. It teaches everything at once: photos are
  * a thing, you talk in your own words, and you can keep changing the picture.
- * It ends by handing over to the composer; there is exactly one way to draw.
+ * No captions around it: a chat needs none.
  */
 private object Example {
     class Sample(val prompt: String, val photos: List<String>, val result: Int, val reply: String)
@@ -481,29 +481,12 @@ private object Example {
 }
 
 private fun LazyListScope.sampleSession() {
-    item {
-        Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Tell me, or add photos and say what to do with them. Like this:",
-                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
-            )
-        }
-    }
-    Example.turns.forEachIndexed { i, t ->
+    Example.turns.forEach { t ->
         item {
             val ctx = LocalContext.current
             RequestBubble(t.prompt, t.photos.map { Uri.parse("android.resource://${ctx.packageName}/raw/$it") })
         }
         item { ReplyBubble(listOf(t.result), t.reply) }
-    }
-    item {
-        Text(
-            "Your turn! Say it, type it, or add a photo 👇",
-            style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        )
     }
 }
 
