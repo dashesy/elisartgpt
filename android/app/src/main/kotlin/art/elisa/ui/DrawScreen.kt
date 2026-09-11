@@ -50,7 +50,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -87,6 +91,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.graphics.Color
+import art.elisa.Media
 import art.elisa.Api
 import art.elisa.AppVersion
 import art.elisa.BuildConfig
@@ -100,6 +107,9 @@ import kotlinx.coroutines.launch
 
 /** What was just sent and is still being drawn; shown as a bubble until the reply lands. */
 private data class Pending(val prompt: String, val photos: List<Uri>)
+
+/** A picture opened full screen; from the gallery it can also jump into its thread. */
+private data class Viewing(val d: Drawing, val name: String, val fromGallery: Boolean)
 
 /**
  * The whole app after pairing. A drawing is a conversation: each request is a
@@ -121,7 +131,18 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     var showGallery by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<AppVersion?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<Viewing?>(null) }
+    // A picture to land on when a thread opens from the gallery; consumed once.
+    var scrollTo by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+
+    fun delete(d: Drawing) {
+        scope.launch {
+            runCatching { api.deleteDrawing(d.id) }
+                .onSuccess { gallery.remove(d); if (current?.id == d.id) current = null }
+                .onFailure { error = it.message }
+        }
+    }
 
     LaunchedEffect(Unit) {
         runCatching { gallery.addAll(api.drawings()) }
@@ -152,6 +173,13 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 current = d
                 gallery.removeAll { it.id == d.id }
                 gallery.add(0, d)
+                // Into the phone's Photos on arrival, so nothing has to be "saved" by hand.
+                // Android 9 and older would need a permission prompt here; those save from the viewer.
+                if (!Media.needsStoragePermission) {
+                    d.turns.lastOrNull()?.images?.forEach { name ->
+                        runCatching { Media.saveToPhotos(ctx, api.bytes(api.imageUrl(d, name)), "elisa-${d.id}-$name") }
+                    }
+                }
             } catch (e: Exception) {
                 current = before
                 prompt = sent.prompt
@@ -168,8 +196,19 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         SettingsScreen(api, store, onBack = { showSettings = false }, onForget = onForget)
         return
     }
+    viewing?.let { v ->
+        return PictureViewer(
+            api, v.d, v.name,
+            onClose = { viewing = null },
+            onError = { error = it },
+            onOpenChat = if (v.fromGallery) {
+                { current = v.d; scrollTo = v.name; showGallery = false; viewing = null }
+            } else null,
+            onDelete = { delete(v.d); viewing = null },
+        )
+    }
     if (showGallery) {
-        GalleryScreen(api, gallery, onPick = { current = it; showGallery = false }, onBack = { showGallery = false })
+        GalleryScreen(api, gallery, onPick = { d, name -> viewing = Viewing(d, name, fromGallery = true) }, onBack = { showGallery = false })
         return
     }
 
@@ -200,18 +239,25 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) {
                     item { RequestBubble(t.prompt, t.photos.map { api.authed(api.photoUrl(d, it), ctx) }) }
                 }
-                item { ReplyBubble(api, d, t) }
+                item { ReplyBubble(api, d, t, onTap = { viewing = Viewing(d, it, fromGallery = false) }) }
             }
             p?.let {
                 item { RequestBubble(it.prompt, it.photos) }
                 item { ThinkingBubble() }
             }
         }
-        // Keep the newest bubble in view, like any chat. The sample session is
-        // read top-down, so it stays where it starts.
-        LaunchedEffect(d?.turns?.size, p, busy) {
-            val n = listState.layoutInfo.totalItemsCount
-            if (n > 0 && (d != null || p != null)) listState.animateScrollToItem(n - 1)
+        // Keep the newest bubble in view, like any chat, unless the thread was opened
+        // from the gallery on a particular picture. The sample session is read
+        // top-down, so it stays where it starts.
+        LaunchedEffect(d?.id, d?.turns?.size, p, busy, scrollTo) {
+            val target = scrollTo
+            if (d != null && target != null) {
+                scrollTo = null
+                listState.scrollToItem(itemIndexOf(d, target, hasBanner = update != null))
+            } else if (d != null || p != null) {
+                val n = listState.layoutInfo.totalItemsCount
+                if (n > 0) listState.animateScrollToItem(n - 1)
+            }
         }
 
         // Above the composer, not inside the thread: it must be visible even when
@@ -324,6 +370,17 @@ private fun MicButton(
     }
 }
 
+/** Which list item shows the turn holding [image]: the banner, then a request and a reply per turn. */
+private fun itemIndexOf(d: Drawing, image: String, hasBanner: Boolean): Int {
+    var i = if (hasBanner) 1 else 0
+    for (t in d.turns) {
+        if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) i++
+        if (image in t.images) return i
+        i++
+    }
+    return i
+}
+
 /** The person's side of the conversation: photos first, then the words, on the right. */
 @Composable
 private fun RequestBubble(text: String, photos: List<Any>) {
@@ -349,24 +406,91 @@ private fun RequestBubble(text: String, photos: List<Any>) {
 }
 
 @Composable
-private fun ReplyBubble(api: Api, d: Drawing, t: Turn) {
+private fun ReplyBubble(api: Api, d: Drawing, t: Turn, onTap: (String) -> Unit) {
     val ctx = LocalContext.current
-    ReplyBubble(t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text)
+    ReplyBubble(t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text, onTap = { onTap(t.images[it]) })
 }
 
-/** The picture(s) that came back and the one-line reply, on the left. */
+/** The picture(s) that came back and the one-line reply, on the left. Tap a picture to open it. */
 @Composable
-private fun ReplyBubble(images: List<Any>, text: String) {
+private fun ReplyBubble(images: List<Any>, text: String, onTap: ((Int) -> Unit)? = null) {
     Column(Modifier.fillMaxWidth(0.92f)) {
-        images.forEach { m ->
+        images.forEachIndexed { i, m ->
             AsyncImage(
-                m, null, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)),
+                m, null,
+                Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
+                    .then(if (onTap != null) Modifier.clickable { onTap(i) } else Modifier),
                 contentScale = ContentScale.Crop,
             )
             Spacer(Modifier.height(6.dp))
         }
         val line = text.ifBlank { if (images.isEmpty()) "Hmm, nothing came out that time. Try again?" else "" }
         if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 4.dp))
+    }
+}
+
+/**
+ * Full-screen picture with the two ways out of the app: share (Android's
+ * sheet, so WhatsApp and Instagram are right there) and save to Photos.
+ */
+@Composable
+private fun PictureViewer(
+    api: Api, d: Drawing, name: String,
+    onClose: () -> Unit, onError: (String) -> Unit, onOpenChat: (() -> Unit)?, onDelete: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var saved by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            icon = { Icon(Icons.Filled.Delete, null) },
+            title = { Text("Delete this drawing?") },
+            text = { Text("All its pictures and the conversation go away for good.") },
+            confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
+            dismissButton = { Button(onClick = { confirmDelete = false }) { Text("Keep it") } },
+        )
+    }
+    val askStorage = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) scope.launch { runCatching { Media.saveToPhotos(ctx, api.bytes(api.imageUrl(d, name)), "elisa-${d.id}-$name") }.onSuccess { saved = true } }
+    }
+    BackHandler(onBack = onClose)
+    // A screen, not a Dialog: dialog windows ignore the system bars and the buttons end
+    // up under the navigation bar.
+    Box(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
+        run {
+            AsyncImage(
+                api.authed(api.imageUrl(d, name), ctx), d.text,
+                Modifier.fillMaxSize().clickable(onClick = onClose),
+                contentScale = ContentScale.Fit,
+            )
+            Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Delete drawing", tint = Color.White) }
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
+            }
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                onOpenChat?.let {
+                    OutlinedButton(onClick = it, colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
+                        Icon(Icons.Filled.ChatBubble, null); Spacer(Modifier.size(8.dp)); Text("Open chat")
+                    }
+                }
+                Button(onClick = {
+                    scope.launch { runCatching { Media.share(ctx, api.bytes(api.imageUrl(d, name)), "elisa-$name") }.onFailure { onError("Couldn't share that.") } }
+                }) { Icon(Icons.Filled.Share, null); Spacer(Modifier.size(8.dp)); Text("Share") }
+                OutlinedButton(
+                    onClick = {
+                        if (Media.needsStoragePermission) askStorage.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        else scope.launch { runCatching { Media.saveToPhotos(ctx, api.bytes(api.imageUrl(d, name)), "elisa-${d.id}-$name") }.onSuccess { saved = true }.onFailure { onError("Couldn't save that.") } }
+                    },
+                    enabled = !saved,
+                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                ) { Icon(Icons.Filled.Download, null); Spacer(Modifier.size(8.dp)); Text(if (saved) "Saved" else "Save") }
+            }
+        }
     }
 }
 
@@ -550,23 +674,18 @@ private fun PhotoStrip(photos: MutableList<Uri>, enabled: Boolean) {
     }
 }
 
+/** Every picture ever made, newest first, like a chat's media grid. Tap one to open it. */
 @Composable
-private fun GalleryScreen(api: Api, gallery: List<Drawing>, onPick: (Drawing) -> Unit, onBack: () -> Unit) {
+private fun GalleryScreen(api: Api, gallery: List<Drawing>, onPick: (Drawing, String) -> Unit, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back") }
             Text("My drawings", style = MaterialTheme.typography.headlineSmall)
         }
-        if (gallery.none { it.images.isNotEmpty() }) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Nothing here yet!") }
-            return
-        }
-        LazyVerticalGrid(GridCells.Fixed(2), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(gallery.filter { it.images.isNotEmpty() }, key = { it.id }) { d ->
-                Picture(
-                    api, d, d.images.last(),
-                    Modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp)).clickable { onPick(d) },
-                )
+        val pictures = gallery.flatMap { d -> d.images.asReversed().map { d to it } }
+        LazyVerticalGrid(GridCells.Fixed(3), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(pictures, key = { it.first.id + it.second }) { (d, name) ->
+                Picture(api, d, name, Modifier.aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onPick(d, name) })
             }
         }
     }

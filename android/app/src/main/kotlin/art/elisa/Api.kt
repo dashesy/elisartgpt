@@ -63,6 +63,18 @@ class Api(private val baseUrl: String, private val code: String) {
     suspend fun whoami(): Whoami = get("/whoami")
     suspend fun appVersion(): AppVersion = get("/app/version")
     suspend fun drawings(): List<Drawing> = get("/drawings")
+    suspend fun deleteDrawing(id: String) = withContext(Dispatchers.IO) {
+        client.newCall(Request.Builder().url("$baseUrl/drawings/$id").header("Authorization", authHeader).delete().build())
+            .execute().use { if (!it.isSuccessful) throw ApiError(it.code, friendly(it.code, "")) }
+    }
+
+    /** Raw bytes of one of our pictures, for saving to Photos or sharing. */
+    suspend fun bytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+        client.newCall(Request.Builder().url(url).header("Authorization", authHeader).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw ApiError(resp.code, friendly(resp.code, ""))
+            resp.body!!.bytes()
+        }
+    }
     suspend fun newDrawing(prompt: String, photos: List<ByteArray> = emptyList()): Drawing =
         post("/drawings", body(prompt, photos))
     suspend fun continueDrawing(id: String, prompt: String, photos: List<ByteArray> = emptyList()): Drawing =

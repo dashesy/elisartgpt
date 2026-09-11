@@ -43,6 +43,11 @@ per drawing, so "make it blue" edits the same picture.
   it!" always sends into the open thread; "+" in the top bar starts a new one
   (like a new chat), so the send button never asks "same or new". The server records `turns` for this;
   the flat `images`/`photos`/`text` fields remain for older app builds.
+- Gallery is every picture (newest first), not one tile per drawing. Tapping a
+  picture anywhere opens a full-screen viewer with Share (Android sheet), Save
+  (Pictures/Elisa Art via MediaStore), Delete drawing (server `DELETE`), and
+  from the gallery "Open chat", which scrolls the thread to that picture. New
+  pictures are also saved to Pictures/Elisa Art on arrival (Android 10+).
 - Voice: a mic button beside the text box runs Android's `SpeechRecognizer`
   in-app (RECORD_AUDIO, asked once), Persian by default with an English switch
   in Settings; words stream into the box as they are heard. Hints and the
