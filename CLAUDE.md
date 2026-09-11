@@ -35,6 +35,11 @@ per drawing, so "make it blue" edits the same picture.
   JPEG and posts multipart; plain JSON `{"prompt"}` still works for old builds.
   Photos are kept next to the drawing as `in-NNN.jpg`. How the model should
   read them lives in `server/elisart/workspace_agents.md`, not in code.
+- Elisa's watercolor (`server/elisart/static/painting.jpg`, face crop in
+  `android/.../drawable-nodpi/ic_launcher_painting.png`) is the launcher icon and
+  the top of the download page. The first-open screen shows a worked example
+  (wristband + hand -> pink wristband, Persian sentence) whose photos ship in
+  `res/raw` and attach through the normal upload path via `android.resource://`.
 - People authenticate with an invite code (`make code NAME=elisa`), sent as a
   bearer token and stored hashed in `data/codes.json`. Each code owns its own
   gallery and hourly quota. The app ships with the server URL and asks only

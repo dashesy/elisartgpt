@@ -70,6 +70,11 @@ import art.elisa.AppVersion
 import art.elisa.BuildConfig
 import art.elisa.Drawing
 import art.elisa.Photos
+import art.elisa.R
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import art.elisa.Whoami
 import kotlinx.coroutines.launch
 
@@ -159,10 +164,10 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                         Text(if (photos.isEmpty()) "Drawing… this takes about a minute" else "Looking at your photos and drawing… about a minute")
                     }
                     d != null && d.images.isNotEmpty() -> Picture(api, d, d.images.last(), Modifier.fillMaxSize())
-                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Tell me, or add a photo to draw on", style = MaterialTheme.typography.bodyMedium)
+                    else -> Example {
+                        photos.clear()
+                        photos.addAll(Example.photos(ctx))
+                        prompt = Example.PROMPT
                     }
                 }
             }
@@ -220,6 +225,43 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
             }
         }
+    }
+}
+
+/**
+ * The first thing a new person sees: a real request with photos and what came
+ * out of it. "Try this one" loads the same photos and words, so the very first
+ * tap on Draw demonstrates the whole idea rather than a blank box.
+ */
+private object Example {
+    // Spoken Persian, the way the kid would say it out loud; it also shows that any language works.
+    const val PROMPT = "این دستبند رو بذار روی دستم و صورتیش کن"
+
+    // Resource URIs go through the same shrink-and-upload path as camera shots.
+    fun photos(ctx: android.content.Context): List<Uri> = listOf("example_wristband", "example_hand")
+        .map { Uri.parse("android.resource://${ctx.packageName}/raw/$it") }
+}
+
+@Composable
+private fun Example(onTry: () -> Unit) {
+    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text("Tell me, or add photos and say what to do with them", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val ctx = LocalContext.current
+            Example.photos(ctx).forEachIndexed { i, uri ->
+                if (i > 0) Text("+", style = MaterialTheme.typography.titleLarge)
+                AsyncImage(uri, null, Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+            }
+            Text("→", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 4.dp))
+            Image(painterResource(R.drawable.example_result), null, Modifier.size(96.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("«${Example.PROMPT}»", style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onTry) { Text("Try this one") }
     }
 }
 

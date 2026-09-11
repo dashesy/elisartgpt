@@ -125,7 +125,10 @@ def test_revoked_code_is_rejected(client, code, tmp_path):
 def test_download_page_without_apk(client):
     r = client.get("/")
     assert r.status_code == 200 and "not uploaded yet" in r.text
+    assert '<img class="painting" src="/painting.jpg"' in r.text
     assert client.get("/app/elisart.apk").status_code == 404
+    p = client.get("/painting.jpg")
+    assert p.status_code == 200 and p.content[:2] == b"\xff\xd8"
 
 
 def test_app_version(client, tmp_path, monkeypatch):
@@ -147,4 +150,5 @@ def test_downloads_off_hides_public_surface_only(client, code, monkeypatch):
     assert client.get("/").status_code == 404
     assert client.get("/app/elisart.apk").status_code == 404
     assert client.get("/app/version").status_code == 404
+    assert client.get("/painting.jpg").status_code == 404
     assert client.get("/whoami", headers={"Authorization": f"Bearer {code}"}).status_code == 200

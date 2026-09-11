@@ -3,11 +3,12 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ValidationError
 
 # Parsed forms yield Starlette's class, not FastAPI's subclass, so check for this one.
@@ -124,9 +125,17 @@ def _require_downloads() -> None:
         raise HTTPException(404, "not found")
 
 
+@app.get("/painting.jpg")
+def painting() -> Response:
+    """Elisa's own watercolor, the face of the app and the top of the landing page."""
+    _require_downloads()
+    data = resources.files("elisart").joinpath("static/painting.jpg").read_bytes()
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+
 @app.get("/", response_class=HTMLResponse)
 def download_page() -> str:
-    """Public landing page: install link plus the two-step instruction."""
+    """Public landing page: the painting, the install link, the two-step instruction."""
     _require_downloads()
     has_apk = settings.apk_path.exists()
     link = (
@@ -138,11 +147,14 @@ def download_page() -> str:
 <meta name="viewport" content="width=device-width">
 <title>Elisa Art</title>
 <style>
-body{{font-family:system-ui;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.5}}
+body{{font-family:system-ui;max-width:28rem;margin:1.5rem auto 3rem;padding:0 1rem;line-height:1.5}}
+.painting{{display:block;width:100%;max-height:70vh;object-fit:cover;object-position:top;
+          border-radius:1rem;box-shadow:0 8px 24px rgba(0,0,0,.15)}}
 .btn{{display:inline-block;background:#e91e63;color:#fff;padding:.8rem 1.4rem;
      border-radius:.6rem;text-decoration:none;font-weight:600}}
 ol li{{margin:.4rem 0}}
 </style>
+<img class="painting" src="/painting.jpg" alt="Elisa's watercolor of a girl with a sea in her hair">
 <h1>🎨 Elisa Art</h1>
 <p>Type what you want to see, get a picture.</p>
 {link}
