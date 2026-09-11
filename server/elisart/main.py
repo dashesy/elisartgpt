@@ -245,9 +245,12 @@ async def _read_request(request: Request) -> tuple[str, list[UploadFile]]:
     `prompt` field and up to MAX_PHOTOS `photos` files."""
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
-            return Prompt.model_validate_json(await request.body()).prompt, []
+            prompt = Prompt.model_validate_json(await request.body()).prompt.strip()
         except ValidationError as e:
             raise HTTPException(422, "bad request body") from e
+        if not prompt:
+            raise HTTPException(422, "say what to draw, or add a photo")
+        return prompt, []
     form = await request.form()
     photos = [f for f in form.getlist("photos") if isinstance(f, UploadFile)]
     if len(photos) > MAX_PHOTOS:

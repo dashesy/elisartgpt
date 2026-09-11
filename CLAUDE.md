@@ -39,8 +39,9 @@ per drawing, so "make it blue" edits the same picture.
 - Secrets never enter the repo. Server config lives in `.env` (see `.env.example`);
   the ChatGPT credential lives only in `~/.codex/auth.json` on the VM.
 - The main screen is a chat per drawing: request bubbles (words + photo
-  thumbnails) on the right, pictures and the model's line on the left,
-  "Change it" appends to the same thread. The server records `turns` for this;
+  thumbnails) on the right, pictures and the model's line on the left. "Draw
+  it!" always sends into the open thread; "+" in the top bar starts a new one
+  (like a new chat), so the send button never asks "same or new". The server records `turns` for this;
   the flat `images`/`photos`/`text` fields remain for older app builds.
 - Voice: a mic button beside the text box runs Android's `SpeechRecognizer`
   in-app (RECORD_AUDIO, asked once), Persian by default with an English switch

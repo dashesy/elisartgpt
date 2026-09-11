@@ -112,6 +112,7 @@ def test_photo_limits(client, code, tmp_path, monkeypatch):
     gif = ("photos", ("a.gif", b"x", "image/gif"))
     assert client.post("/drawings", data={"prompt": "x"}, files=[gif], headers=h).status_code == 415
     assert client.post("/drawings", data={"prompt": "  "}, headers=h).status_code == 422
+    assert client.post("/drawings", json={"prompt": " "}, headers=h).status_code == 422
     assert (
         client.post("/drawings", json={"prompt": "no photos, old app"}, headers=h).status_code
         == 200

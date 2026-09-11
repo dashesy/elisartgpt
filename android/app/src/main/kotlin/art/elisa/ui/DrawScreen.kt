@@ -47,6 +47,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Close
@@ -103,7 +104,8 @@ private data class Pending(val prompt: String, val photos: List<Uri>)
 /**
  * The whole app after pairing. A drawing is a conversation: each request is a
  * bubble on the right with its words and photos, each picture a reply on the
- * left, and "Change it" continues the same thread. Scrolling up is the history.
+ * left, and "Draw it!" always continues the open thread. Scrolling up is the
+ * history; "+" in the top bar starts a new thread, like a new chat.
  */
 @Composable
 fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
@@ -133,7 +135,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
 
     // The request shows up as a bubble at once; the photos are shrunk while the
     // spinner is already on screen, where a wait is expected anyway.
-    fun run(fresh: Boolean, block: suspend (List<ByteArray>) -> Drawing) {
+    fun run(fresh: Boolean, block: suspend (String, List<ByteArray>) -> Drawing) {
         if (busy) return
         busy = true; error = null
         // Like any chat: the composer empties on send, and refills if the send fails.
@@ -145,7 +147,8 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         if (fresh) current = null
         scope.launch {
             try {
-                val d = block(sent.photos.map { Photos.shrink(ctx, it) })
+                // From `sent`, not the state: the composer was just cleared.
+                val d = block(sent.prompt, sent.photos.map { Photos.shrink(ctx, it) })
                 current = d
                 gallery.removeAll { it.id == d.id }
                 gallery.add(0, d)
@@ -174,6 +177,11 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("🎨 Elisa Art", style = MaterialTheme.typography.headlineSmall)
             Row {
+                // Like "new chat": leaves the open thread and shows an empty one. The
+                // send button never has to ask "same drawing or new?".
+                IconButton(onClick = { current = null; error = null }, enabled = !busy) {
+                    Icon(Icons.Filled.Add, "New drawing")
+                }
                 IconButton(onClick = { showGallery = true }) { Icon(Icons.Filled.Collections, "Gallery") }
                 IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, "Settings") }
             }
@@ -196,7 +204,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
             }
             p?.let {
                 item { RequestBubble(it.prompt, it.photos) }
-                item { ThinkingBubble(withPhotos = it.photos.isNotEmpty()) }
+                item { ThinkingBubble() }
             }
         }
         // Keep the newest bubble in view, like any chat. The sample session is
@@ -224,7 +232,6 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                         when {
                             // Example sentences in the kid's own words, and in the sample's own
                             // story: the empty thread shows wristbands, so the hint asks for one.
-                            listening -> "Listening…"
                             photos.isNotEmpty() -> "این رو بذار روی دستم و صورتیش کن"
                             d == null && p == null -> "حالا یه دستبند آبی با ستاره‌های زرد برام بکش"
                             else -> "مهره‌هاش رو قرمز کن"
@@ -249,27 +256,16 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         // A photo alone is a request too ("draw this"), so photos unlock the button like words do.
+        // One button: it continues the open thread, or starts one if the thread is empty.
         val ready = !busy && (prompt.isNotBlank() || photos.isNotEmpty())
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (d != null) {
-                Button(
-                    onClick = { run(fresh = false) { api.continueDrawing(d.id, prompt, it) } },
-                    enabled = ready,
-                    modifier = Modifier.weight(1f),
-                ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Change it") }
-                OutlinedButton(
-                    onClick = { run(fresh = true) { api.newDrawing(prompt, it) } },
-                    enabled = ready,
-                    modifier = Modifier.weight(1f),
-                ) { Text("New drawing") }
-            } else {
-                Button(
-                    onClick = { run(fresh = true) { api.newDrawing(prompt, it) } },
-                    enabled = ready,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
-            }
-        }
+        Button(
+            onClick = {
+                if (d != null) run(fresh = false) { words, pics -> api.continueDrawing(d.id, words, pics) }
+                else run(fresh = true) { words, pics -> api.newDrawing(words, pics) }
+            },
+            enabled = ready,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
     }
 }
 
@@ -374,13 +370,22 @@ private fun ReplyBubble(images: List<Any>, text: String) {
     }
 }
 
+/** The "typing…" dots of a chat app; a drawing takes about a minute and the dots say "wait" without words. */
 @Composable
-private fun ThinkingBubble(withPhotos: Boolean) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(12.dp))
-            Text(if (withPhotos) "Looking at your photos and drawing… about a minute" else "Drawing… this takes about a minute")
+private fun ThinkingBubble() {
+    Row {
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)) {
+            Row(Modifier.padding(horizontal = 18.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val t = rememberInfiniteTransition(label = "dots")
+                repeat(3) { i ->
+                    val a by t.animateFloat(
+                        0.25f, 1f,
+                        infiniteRepeatable(tween(500, delayMillis = i * 160), RepeatMode.Reverse),
+                        label = "dot$i",
+                    )
+                    Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = a)))
+                }
+            }
         }
     }
 }
