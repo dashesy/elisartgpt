@@ -10,7 +10,22 @@ per drawing, so "make it blue" edits the same picture.
 - `server/` — Python 3.13, FastAPI, `uv`. Spawns `codex exec --json`, parses the
   JSONL events, picks generated PNGs up from `$CODEX_HOME/generated_images/<thread_id>/`.
 - `android/` — Kotlin + Jetpack Compose client. Sideloaded APK, no store.
-- `deploy/` — VM bootstrap (Tailscale, Codex, systemd unit).
+- `deploy/` — VM bootstrap script, Caddyfile, systemd unit.
+
+## The VM (Azure)
+
+- **In this repo "the VM" means `elisart`**, the ssh alias for the Azure box
+  (public IP x.x.x.x, resource group `RESOURCE_GROUP`, REGION, B2ms, Ubuntu
+  24.04). It is not the `my_dev_vm` box from the global notes. The `az` CLI is
+  logged in to the personal subscription: `az vm show -g RESOURCE_GROUP -n elisart -d`.
+- Caddy terminates HTTPS at `https://EXAMPLE.sslip.io` (the IP spelled
+  as a hostname, so no DNS) and proxies to uvicorn on 127.0.0.1:8787. The NSG
+  `elisart-nsg` opens 22/80/443 only.
+- The repo is checked out at `~/elisartgpt` on the VM; the service is
+  `elisart@USER` (systemd template in `deploy/`). `make vm-status`,
+  `make deploy` (pull + sync + restart), `make downloads-on/off`, `make publish`
+  all work from this repo over ssh. Codes are minted on the VM because
+  `data/codes.json` lives there.
 
 ## Rules
 
@@ -21,8 +36,21 @@ per drawing, so "make it blue" edits the same picture.
   gallery and hourly quota. The app ships with the server URL and asks only
   for the code.
 - Tools are pinned in `mise.toml`. Python is always `uv run`, never bare `python`.
-- `make help` lists every task. Tests and lint run through the Makefile.
+- `make help` lists every task. Tests and lint run through the Makefile
+  (`make test`, `make lint`; CI runs the same two via `mise-action`).
+- `make apk` needs the Android SDK at `~/Library/Android/sdk`; the JDK comes
+  from mise. `make smoke` draws for real and spends the ChatGPT plan.
 - Comment the *why*, never the *what*.
+
+## The VM
+
+"The VM" here is the Azure box `elisart` (ssh alias of the same name; resource
+group `RESOURCE_GROUP`, REGION, Ubuntu 24.04). It runs the API as `elisart@USER`
+behind Caddy at https://EXAMPLE.sslip.io. The repo is
+cloned at `~/elisartgpt`; deploy = `git pull` + `sudo systemctl restart
+elisart@USER`. `make vm-status` from the laptop shows all four services.
+`make publish` uploads a new app build; `make downloads-on/off` toggles the
+public download page. Invite codes: `make code NAME=<person>` on the VM.
 
 ## Testing the app without a phone
 
