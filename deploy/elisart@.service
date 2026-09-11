@@ -5,9 +5,10 @@ Wants=network-online.target
 
 [Service]
 User=%i
-WorkingDirectory=/home/%i/elisartgpt/server
-EnvironmentFile=/home/%i/elisartgpt/.env
-ExecStart=/home/%i/elisartgpt/server/.venv/bin/python -m uvicorn elisart.main:app --host ${ELISART_HOST} --port ${ELISART_PORT}
+# {{VM_REPO}} is filled in by `make vm-config` from ELISART_VM_REPO in .env.
+WorkingDirectory=/home/%i/{{VM_REPO}}/server
+EnvironmentFile=/home/%i/{{VM_REPO}}/.env
+ExecStart=/home/%i/{{VM_REPO}}/server/.venv/bin/python -m uvicorn elisart.main:app --host ${ELISART_HOST} --port ${ELISART_PORT}
 Restart=on-failure
 RestartSec=5
 

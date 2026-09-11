@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke deploy downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke vm-check vm-config deploy downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
+
+# Everything machine-specific (VM alias, paths, public URL) comes from .env.
+-include .env
 
 SERVER := server
 # Gradle needs a JDK; resolve mise's pin even from a shell without `mise activate`.
@@ -31,31 +34,42 @@ fmt: ## Format
 smoke: ## Generate one picture through codex end to end (uses your plan)
 	cd $(SERVER) && uv run python -m elisart.smoke
 
-VM := elisart
-VM_REPO := elisartgpt
+VM := $(ELISART_VM)
+VM_REPO := $(ELISART_VM_REPO)
+PUBLIC_URL := $(ELISART_PUBLIC_URL)
+PUBLIC_HOST := $(patsubst https://%,%,$(patsubst http://%,%,$(PUBLIC_URL)))
 
-PUBLIC_URL := https://EXAMPLE.sslip.io
+vm-check:
+	@test -n "$(VM)" -a -n "$(VM_REPO)" -a -n "$(PUBLIC_URL)" || { echo "set ELISART_VM, ELISART_VM_REPO and ELISART_PUBLIC_URL in .env"; exit 1; }
+
 # Restart the API on the VM and wait until it answers again (uvicorn takes a second).
 define vm_restart
 	ssh $(VM) 'cd $(VM_REPO) && sudo systemctl restart elisart@$$USER && for i in $$(seq 20); do curl -sf 127.0.0.1:8787/health >/dev/null && break; sleep 0.5; done'
 endef
 
-deploy: ## VM: pull main, sync deps, restart the API
-	ssh $(VM) 'cd $(VM_REPO) && git pull --ff-only && (cd server && ~/.local/bin/mise exec -- uv sync -q)'
+vm-config: vm-check ## VM: render Caddyfile + systemd unit from .env and install them
+	sed 's#{{PUBLIC_HOST}}#$(PUBLIC_HOST)#' deploy/Caddyfile | ssh $(VM) 'sudo tee /etc/caddy/Caddyfile >/dev/null && sudo systemctl reload caddy'
+	sed 's#{{VM_REPO}}#$(VM_REPO)#g' deploy/elisart@.service | ssh $(VM) 'sudo tee /etc/systemd/system/elisart@.service >/dev/null && sudo systemctl daemon-reload && sudo systemctl enable --now elisart@$$USER'
+
+# reset --hard, not pull: history gets rewritten when something machine-specific
+# slips in, and the VM checkout must follow. .env and data/ are untracked and survive.
+deploy: vm-check ## VM: check out origin/main, sync deps, restart the API
+	ssh $(VM) 'cd $(VM_REPO) && git fetch -q origin && git reset -q --hard origin/main && (cd server && ~/.local/bin/mise exec -- uv sync -q)'
 	$(vm_restart)
 	@ssh $(VM) 'cd $(VM_REPO) && git log --oneline -1'
 
-downloads-on: ## VM: expose the download page + APK
+downloads-on: vm-check ## VM: expose the download page + APK
 	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=true/" .env'
 	$(vm_restart)
 	@curl -s -o /dev/null -w "download page: %{http_code} (200 = public)\n" $(PUBLIC_URL)/
 
-downloads-off: ## VM: hide the download page + APK (API keeps working)
+downloads-off: vm-check ## VM: hide the download page + APK (API keeps working)
 	ssh $(VM) 'cd $(VM_REPO) && sed -i "s/^ELISART_DOWNLOADS=.*/ELISART_DOWNLOADS=false/" .env'
 	$(vm_restart)
 	@curl -s -o /dev/null -w "download page: %{http_code} (404 = hidden)\n" $(PUBLIC_URL)/
 
-vm-status: ## VM: service state and recent log lines
+vm-status: vm-check ## VM: service state and recent log lines (+ Azure power state if configured)
+	@test -z "$(ELISART_AZ_RG)" || az vm show -g $(ELISART_AZ_RG) -n $(ELISART_AZ_VM) -d --query powerState -o tsv
 	ssh $(VM) 'systemctl is-active elisart@$$USER caddy | paste -sd" "; journalctl -u elisart@$$USER -n 5 --no-pager -o cat'
 
 code: ## Mint an invite code: make code NAME=elisa
@@ -70,11 +84,11 @@ revoke: ## Revoke someone's code: make revoke NAME=elisa
 apk: ## Build the signed release APK (android/keystore.properties; debug key if absent)
 	cd android && ./gradlew -q assembleRelease && ls -la app/build/outputs/apk/release/elisart.apk
 
-publish: apk ## Build and upload the APK (+ version.json for the in-app update check)
+publish: vm-check apk ## Build and upload the APK (+ version.json for the in-app update check)
 	@out=android/app/build/outputs/apk/release; \
 	jq '{versionCode: .elements[0].versionCode, versionName: .elements[0].versionName, url: ""}' $$out/output-metadata.json > $$out/version.json; \
 	cat $$out/version.json; \
-	ssh elisart 'mkdir -p elisartgpt/data/app' && scp $$out/elisart.apk $$out/version.json elisart:elisartgpt/data/app/
+	ssh $(VM) 'mkdir -p $(VM_REPO)/data/app' && scp $$out/elisart.apk $$out/version.json $(VM):$(VM_REPO)/data/app/
 
 emu: ## Boot the headless Android emulator (AVD "elisart") and wait for Android
 	@$(ANDROID_HOME)/emulator/emulator -avd elisart -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >/tmp/elisart-emulator.log 2>&1 &

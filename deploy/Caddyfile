@@ -1,6 +1,7 @@
-# Public HTTPS front for the server. The hostname is the VM's public IP spelled
-# out under sslip.io, so no DNS setup is needed; Caddy fetches the certificate.
-EXAMPLE.sslip.io {
+# Public HTTPS front for the server. `make vm-config` fills in {{PUBLIC_HOST}} from
+# ELISART_PUBLIC_URL in .env: the VM's public IP spelled with dashes under
+# sslip.io, so no DNS setup is needed and Caddy fetches the certificate itself.
+{{PUBLIC_HOST}} {
 	encode gzip
 	# Image turns take 30-60 s; keep the proxy patient.
 	reverse_proxy 127.0.0.1:8787 {

@@ -12,20 +12,27 @@ per drawing, so "make it blue" edits the same picture.
 - `android/` — Kotlin + Jetpack Compose client. Sideloaded APK, no store.
 - `deploy/` — VM bootstrap script, Caddyfile, systemd unit.
 
-## The VM (Azure)
+## The VM
 
-- **In this repo "the VM" means `elisart`**, the ssh alias for the Azure box
-  (public IP x.x.x.x, resource group `RESOURCE_GROUP`, REGION, B2ms, Ubuntu
-  24.04). It is not the `my_dev_vm` box from the global notes. The `az` CLI is
-  logged in to the personal subscription: `az vm show -g RESOURCE_GROUP -n elisart -d`.
-- Caddy terminates HTTPS at `https://EXAMPLE.sslip.io` (the IP spelled
-  as a hostname, so no DNS) and proxies to uvicorn on 127.0.0.1:8787. The NSG
-  `elisart-nsg` opens 22/80/443 only.
-- The repo is checked out at `~/elisartgpt` on the VM; the service is
-  `elisart@USER` (systemd template in `deploy/`). `make vm-status`,
-  `make deploy` (pull + sync + restart), `make downloads-on/off`, `make publish`
-  all work from this repo over ssh. Codes are minted on the VM because
-  `data/codes.json` lives there.
+- "The VM" in this repo is whatever `ELISART_VM` in `.env` names (an ssh
+  alias), with the checkout at `~/$ELISART_VM_REPO` on it. Nothing
+  machine-specific goes in tracked files: no hostnames, IPs, ssh aliases,
+  usernames, paths on the VM, cloud resource names or `az` commands with real
+  names. All of it lives in `.env` (gitignored), and the Makefile, the deploy
+  templates and the Android build read it from there. Docs say
+  `$ELISART_PUBLIC_URL`, not the address.
+- Caddy terminates HTTPS at `ELISART_PUBLIC_URL` (the public IP spelled under
+  sslip.io, so no DNS) and proxies to uvicorn on 127.0.0.1:8787; only 22, 80
+  and 443 are open.
+- The service is the systemd template `elisart@<user>`. From the laptop:
+  `make vm-config` renders the Caddyfile and unit from `.env` and installs
+  them; `make deploy` resets the VM checkout to origin/main, syncs and
+  restarts; `make vm-status`, `make downloads-on/off`, `make publish`. Invite
+  codes are minted on the VM because `data/codes.json` lives there.
+- History was rewritten once (`git filter-repo --replace-text`) to scrub such
+  details. If one slips in again, scrub it from history the same way rather
+  than stacking a "remove" commit on top; `make deploy` resets the VM checkout
+  so a force-push is safe.
 
 ## Rules
 
@@ -52,16 +59,6 @@ per drawing, so "make it blue" edits the same picture.
   (see `packaging` in `android/app/build.gradle.kts`). `make smoke` draws for
   real and spends the ChatGPT plan; it takes a prompt and photo paths too.
 - Comment the *why*, never the *what*.
-
-## The VM
-
-"The VM" here is the Azure box `elisart` (ssh alias of the same name; resource
-group `RESOURCE_GROUP`, REGION, Ubuntu 24.04). It runs the API as `elisart@USER`
-behind Caddy at https://EXAMPLE.sslip.io. The repo is
-cloned at `~/elisartgpt`; deploy = `git pull` + `sudo systemctl restart
-elisart@USER`. `make vm-status` from the laptop shows all four services.
-`make publish` uploads a new app build; `make downloads-on/off` toggles the
-public download page. Invite codes: `make code NAME=<person>` on the VM.
 
 ## Testing the app without a phone
 

@@ -24,8 +24,10 @@ sudo npm install -g @openai/codex
 command -v mise >/dev/null || { curl https://mise.run | sh; echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> ~/.bashrc; }
 export PATH="$HOME/.local/bin:$PATH"
 
-[ -d ~/elisartgpt ] || git clone https://github.com/dashesy/elisartgpt.git ~/elisartgpt
+# Checkout path relative to $HOME; keep it in sync with ELISART_VM_REPO in the laptop's .env.
+REPO_DIR="$HOME/${ELISART_VM_REPO:-elisartgpt}"
+[ -d "$REPO_DIR" ] || git clone https://github.com/dashesy/elisartgpt.git "$REPO_DIR"
 # Only the server toolchain: the JDK/ktlint pins are for building the Android app.
-cd ~/elisartgpt && mise trust && mise install python uv && (cd server && mise exec -- uv sync)
+cd "$REPO_DIR" && mise trust && mise install python uv && (cd server && mise exec -- uv sync)
 
 echo "next: codex login --device-auth; then follow deploy/README.md"

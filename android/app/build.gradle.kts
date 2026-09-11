@@ -16,6 +16,11 @@ fun git(vararg args: String): String = ProcessBuilder("git", *args)
 fun gitCommitCount() = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
 fun gitShortSha() = git("rev-parse", "--short", "HEAD").ifBlank { "dev" }
 
+val dotenv = Properties().apply {
+    val f = rootProject.file("../.env")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -34,9 +39,11 @@ android {
         // update check in the app compares this number against the server's.
         versionCode = gitCommitCount()
         versionName = "0.${gitCommitCount()}-${gitShortSha()}"
-        // The server people install against. Override for a dev build with
-        // -PserverUrl=http://10.0.2.2:8787 (emulator -> host).
-        val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://EXAMPLE.sslip.io"
+        // The server people install against: ELISART_PUBLIC_URL from the repo's .env,
+        // overridable with -PserverUrl=...; without either, the emulator-to-host address.
+        val serverUrl = (project.findProperty("serverUrl") as String?)
+            ?: dotenv.getProperty("ELISART_PUBLIC_URL")
+            ?: "http://10.0.2.2:8787"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
     }
 
