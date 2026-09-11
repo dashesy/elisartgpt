@@ -19,6 +19,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Pictures load through the same client as the API, DNS-free for sslip names.
+        coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).okHttpClient(httpClient).build())
         val store = Store(this)
         setContent {
             MaterialTheme(colorScheme = Palette) {

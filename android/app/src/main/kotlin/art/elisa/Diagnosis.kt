@@ -56,6 +56,14 @@ object Diagnosis {
             runCatching { InetAddress.getAllByName(host).joinToString { it.hostAddress ?: "?" } }
                 .getOrElse { "FAILED ${it.javaClass.simpleName}: ${it.message}" }
         } ?: "timed out")
+        SslipDns.address(host)?.let { ip ->
+            // Straight to the address, no DNS: tells a DNS block apart from an IP block.
+            lines += "TCP ${ip.hostAddress}:443 (no DNS): " + (withTimeoutOrNull(6_000) {
+                val t = System.currentTimeMillis()
+                runCatching { Socket().use { it.connect(InetSocketAddress(ip, 443), 5_000) }; "ok in ${System.currentTimeMillis() - t} ms" }
+                    .getOrElse { "FAILED ${it.javaClass.simpleName}: ${it.message}" }
+            } ?: "timed out")
+        }
         for (port in listOf(443, 80)) {
             lines += "TCP $host:$port: " + (withTimeoutOrNull(6_000) {
                 val t = System.currentTimeMillis()

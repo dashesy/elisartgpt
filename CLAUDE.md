@@ -48,6 +48,10 @@ per drawing, so "make it blue" edits the same picture.
   (Pictures/Elisa Art via MediaStore), Delete drawing (server `DELETE`), and
   from the gallery "Open chat", which scrolls the thread to that picture. New
   pictures are also saved to Pictures/Elisa Art on arrival (Android 10+).
+- The app never asks DNS for the server: `SslipDns` in `Api.kt` reads the
+  address out of the `a-b-c-d.sslip.io` name (Elisa is in Iran, where plain
+  DNS is intercepted while browsers slip through on encrypted DNS). Coil shares
+  that client. Keep the public URL in sslip form or extend `SslipDns`.
 - When the phone cannot reach the server (not an HTTP error), both screens show
   "Send a diagnosis": `Diagnosis.kt` probes DNS, TCP 443/80, `/health`, a
   Google control URL, and reports network type, VPN and private DNS, then

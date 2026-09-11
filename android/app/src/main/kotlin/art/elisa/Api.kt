@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -43,14 +44,37 @@ private data class PromptBody(val prompt: String)
 
 class ApiError(val status: Int, message: String) : IOException(message)
 
-/** Thin client for the elisart server. The invite code is the bearer token. */
-class Api(val baseUrl: String, private val code: String) {
-    private val json = Json { ignoreUnknownKeys = true }
-    private val client = OkHttpClient.Builder()
+/**
+ * The server's name spells out its own address (`1-2-3-4.sslip.io`), so the
+ * app never needs a DNS server to find it. That matters where DNS is
+ * intercepted: a browser quietly upgrades to encrypted DNS and gets through,
+ * a plain app does not. Other names still go to the system resolver.
+ */
+object SslipDns : Dns {
+    private val pattern = Regex("""^(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})\.sslip\.io$""")
+
+    fun address(host: String): java.net.InetAddress? =
+        pattern.matchEntire(host)?.let { m ->
+            java.net.InetAddress.getByAddress(host, m.groupValues.drop(1).map { it.toInt().toByte() }.toByteArray())
+        }
+
+    override fun lookup(hostname: String) = address(hostname)?.let { listOf(it) } ?: Dns.SYSTEM.lookup(hostname)
+}
+
+/** One HTTP client for the API and for pictures, so both skip DNS the same way. */
+val httpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .dns(SslipDns)
         // A drawing is one Codex turn: 30-90 s is normal, so wait well past that.
         .readTimeout(4, TimeUnit.MINUTES)
         .callTimeout(5, TimeUnit.MINUTES)
         .build()
+}
+
+/** Thin client for the elisart server. The invite code is the bearer token. */
+class Api(val baseUrl: String, private val code: String) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private val client = httpClient
 
     fun imageUrl(d: Drawing, name: String) = "$baseUrl/drawings/${d.id}/images/$name"
     fun photoUrl(d: Drawing, name: String) = "$baseUrl/drawings/${d.id}/photos/$name"
