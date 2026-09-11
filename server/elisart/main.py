@@ -101,7 +101,9 @@ def _load(user: str, drawing_id: str) -> Drawing:
     if not path.exists():
         raise HTTPException(404, "no such drawing")
     d = Drawing.model_validate_json(path.read_text())
-    if not d.turns and d.images:
+    # A turn with neither words nor photos cannot be created any more; one in the
+    # file is a placeholder from before turns were recorded and wants backfilling.
+    if d.images and (not d.turns or any(not t.prompt and not t.photos for t in d.turns)):
         d.turns = _backfill_turns(d, path.stat().st_mtime)
         _save(user, d)
     return d
@@ -112,7 +114,7 @@ def _backfill_turns(d: Drawing, mtime: float) -> list[Turn]:
     codex's session log, or failing that show the pictures as one exchange."""
     logged = codex.thread_turns(settings.codex_home, d.thread_id) if d.thread_id else []
     if not logged:
-        return [Turn(prompt="", images=d.images, text=d.text, at=mtime)]
+        return d.turns or [Turn(prompt="", images=d.images, text=d.text, at=mtime)]
     turns = [
         Turn(
             prompt=t.prompt,

@@ -184,9 +184,12 @@ def test_old_drawing_is_backfilled_from_codex_log(client, code, tmp_path, monkey
     )
     meta = tmp_path / "drawings" / "elisa" / "abc" / "meta.json"
     meta.parent.mkdir(parents=True)
+    # As saved by the interim server: a wordless placeholder turn plus one real turn.
     meta.write_text(
         f'{{"id":"abc","thread_id":"{thread}","text":"stars","images":["001.png","002.png"],'
-        '"photos":["in-001.jpg","in-002.jpg"]}'
+        '"photos":["in-001.jpg","in-002.jpg"],"turns":[{"prompt":"","images":["001.png"],"at":1},'
+        '{"prompt":"now put a tiny yellow star on each bead","images":["002.png"],'
+        '"text":"stars","at":2}]}'
     )
     h = {"Authorization": f"Bearer {code}"}
     turns = client.get("/drawings", headers=h).json()[0]["turns"]
