@@ -323,6 +323,14 @@ async def continue_drawing(user: User, drawing_id: str, request: Request) -> Dra
     return await _turn(user, _load(user, drawing_id), prompt, photos)
 
 
+@app.delete("/drawings/{drawing_id}", status_code=204)
+def delete_drawing(user: User, drawing_id: str) -> None:
+    """Removes the pictures, photos and conversation record. The codex thread
+    itself stays in codex's own logs; nothing here points at it any more."""
+    _load(user, drawing_id)
+    shutil.rmtree(_user_dir(user) / drawing_id)
+
+
 @app.get("/drawings/{drawing_id}/images/{name}")
 def image(user: User, drawing_id: str, name: str) -> FileResponse:
     d = _load(user, drawing_id)

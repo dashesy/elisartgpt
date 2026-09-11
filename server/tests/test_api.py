@@ -200,3 +200,22 @@ def test_old_drawing_is_backfilled_from_codex_log(client, code, tmp_path, monkey
     )
     # Backfilled once, then stored: the meta file now carries the turns.
     assert '"turns"' in meta.read_text() and "star" in meta.read_text()
+
+
+def test_delete_drawing(client, code, tmp_path, monkeypatch):
+    (tmp_path / "gen.png").write_bytes(b"png")
+    monkeypatch.setattr(codex, "run_turn", _fake_turn(tmp_path / "gen.png"))
+    h = {"Authorization": f"Bearer {code}"}
+    d = client.post("/drawings", json={"prompt": "cat"}, headers=h).json()
+    other = Codes(tmp_path / "codes.json").add("friend")
+    # Someone else's code cannot delete it.
+    assert (
+        client.delete(
+            f"/drawings/{d['id']}", headers={"Authorization": f"Bearer {other}"}
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/drawings/{d['id']}", headers=h).status_code == 204
+    assert client.get("/drawings", headers=h).json() == []
+    assert not (tmp_path / "drawings" / "elisa" / d["id"]).exists()
+    assert client.delete(f"/drawings/{d['id']}", headers=h).status_code == 404
