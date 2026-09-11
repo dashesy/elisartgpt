@@ -48,8 +48,9 @@ per drawing, so "make it blue" edits the same picture.
   read them lives in `server/elisart/workspace_agents.md`, not in code.
 - Elisa's watercolor (`server/elisart/static/painting.jpg`, face crop in
   `android/.../drawable-nodpi/ic_launcher_painting.png`) is the launcher icon and
-  the top of the download page. The first-open screen shows a worked example
-  (wristband + hand -> pink wristband, Persian sentence) whose photos ship in
+  the top of the download page. The empty thread plays back a sample session in
+  real bubbles (two photos + Persian sentence -> pink wristband -> "add stars"
+  -> stars), with "Try this one" loading the first request; its photos ship in
   `res/raw` and attach through the normal upload path via `android.resource://`.
 - People authenticate with an invite code (`make code NAME=elisa`), sent as a
   bearer token and stored hashed in `data/codes.json`. Each code owns its own

@@ -5,7 +5,6 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -23,6 +22,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -66,7 +66,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -172,15 +171,13 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         ) {
             update?.let { v -> item { UpdateBanner(v) { update = null } } }
             if (d == null && p == null) {
-                item {
-                    Box(Modifier.fillParentMaxHeight(0.92f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Example {
-                            photos.clear()
-                            photos.addAll(Example.photos(ctx))
-                            prompt = Example.PROMPT
-                        }
-                    }
-                }
+                sampleSession(
+                    onTry = {
+                        photos.clear()
+                        photos.addAll(Example.photos(ctx))
+                        prompt = Example.turns[0].prompt
+                    },
+                )
             }
             d?.turns?.forEach { t ->
                 if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) {
@@ -194,10 +191,11 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
             }
             error?.let { e -> item { Text(e, color = MaterialTheme.colorScheme.error) } }
         }
-        // Keep the newest bubble in view, like any chat.
+        // Keep the newest bubble in view, like any chat. The sample session is
+        // read top-down, so it stays where it starts.
         LaunchedEffect(d?.turns?.size, p, error, busy) {
             val n = listState.layoutInfo.totalItemsCount
-            if (n > 0) listState.animateScrollToItem(n - 1)
+            if (n > 0 && (d != null || p != null)) listState.animateScrollToItem(n - 1)
         }
 
         Spacer(Modifier.height(8.dp))
@@ -270,15 +268,24 @@ private fun RequestBubble(text: String, photos: List<Any>) {
     }
 }
 
-/** The picture(s) that came back and the one-line reply, on the left. */
 @Composable
 private fun ReplyBubble(api: Api, d: Drawing, t: Turn) {
+    val ctx = LocalContext.current
+    ReplyBubble(t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text)
+}
+
+/** The picture(s) that came back and the one-line reply, on the left. */
+@Composable
+private fun ReplyBubble(images: List<Any>, text: String) {
     Column(Modifier.fillMaxWidth(0.92f)) {
-        t.images.forEach { name ->
-            Picture(api, d, name, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)))
+        images.forEach { m ->
+            AsyncImage(
+                m, null, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)),
+                contentScale = ContentScale.Crop,
+            )
             Spacer(Modifier.height(6.dp))
         }
-        val line = t.text.ifBlank { if (t.images.isEmpty()) "Hmm, nothing came out that time. Try again?" else "" }
+        val line = text.ifBlank { if (images.isEmpty()) "Hmm, nothing came out that time. Try again?" else "" }
         if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
@@ -349,42 +356,58 @@ private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
 }
 
 /**
- * The first thing a new person sees: a real request with photos and what came
- * out of it. "Try this one" loads the same photos and words, so the very first
- * tap on Draw demonstrates the whole idea rather than a blank box.
+ * The first thing a new person sees: a whole session, played back in the same
+ * bubbles a real one uses. Two photos and a sentence, the picture that came
+ * back, a follow-up, its picture. It teaches everything at once: photos are
+ * a thing, you talk in your own words, and you can keep changing the picture.
+ * "Try this one" loads the first request for real.
  */
 private object Example {
+    class Sample(val prompt: String, val photos: List<String>, val result: Int, val reply: String)
+
     // Spoken Persian, the way the kid would say it out loud; it also shows that any language works.
-    const val PROMPT = "این دستبند رو بذار روی دستم و صورتیش کن"
+    val turns = listOf(
+        Sample(
+            "این دستبند رو بذار روی دستم و صورتیش کن",
+            listOf("example_wristband", "example_hand"),
+            R.drawable.example_result,
+            "دستبندت رو صورتی کردم و روی مچ دستت گذاشتم! 🩷",
+        ),
+        Sample(
+            "حالا روی هر مهره یه ستاره‌ی زرد کوچولو بذار",
+            emptyList(),
+            R.drawable.example_result2,
+            "حالا هر مهره یه ستاره‌ی زرد کوچولو داره! ⭐",
+        ),
+    )
 
     // Resource URIs go through the same shrink-and-upload path as camera shots.
-    fun photos(ctx: android.content.Context): List<Uri> = listOf("example_wristband", "example_hand")
+    fun photos(ctx: android.content.Context): List<Uri> = turns[0].photos
         .map { Uri.parse("android.resource://${ctx.packageName}/raw/$it") }
 }
 
-@Composable
-private fun Example(onTry: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(4.dp))
-        Text("Tell me, or add photos and say what to do with them", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val ctx = LocalContext.current
-            Example.photos(ctx).forEachIndexed { i, uri ->
-                if (i > 0) Text("+", style = MaterialTheme.typography.titleLarge)
-                AsyncImage(uri, null, Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
-            }
-            Text("→", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 4.dp))
-            Image(painterResource(R.drawable.example_result), null, Modifier.size(96.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+private fun LazyListScope.sampleSession(onTry: () -> Unit) {
+    item {
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("What should I draw?", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tell me, or add photos and say what to do with them. Like this:",
+                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
+            )
         }
-        Spacer(Modifier.height(10.dp))
-        Text("«${Example.PROMPT}»", style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(10.dp))
-        OutlinedButton(onClick = onTry) { Text("Try this one") }
+    }
+    Example.turns.forEachIndexed { i, t ->
+        item {
+            val ctx = LocalContext.current
+            RequestBubble(t.prompt, t.photos.map { Uri.parse("android.resource://${ctx.packageName}/raw/$it") })
+        }
+        item { ReplyBubble(listOf(t.result), t.reply) }
+    }
+    item {
+        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Button(onClick = onTry) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Try this one") }
+        }
     }
 }
 
