@@ -19,6 +19,11 @@ class Store(context: Context) {
         get() = prefs.getString("code", null)
         set(v) = prefs.edit().putString("code", v).apply()
 
+    /** BCP-47 tag for voice input; Persian unless changed in Settings. */
+    var speechLanguage: String
+        get() = prefs.getString("speech", "fa-IR") ?: "fa-IR"
+        set(v) = prefs.edit().putString("speech", v).apply()
+
     var serverUrl: String
         get() = prefs.getString("server", null) ?: BuildConfig.SERVER_URL
         set(v) = prefs.edit().putString("server", v.trimEnd('/')).apply()

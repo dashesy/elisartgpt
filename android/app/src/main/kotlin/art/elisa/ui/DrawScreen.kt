@@ -5,6 +5,23 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.draw.scale
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButtonDefaults
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import art.elisa.Speech
+import art.elisa.Store
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -89,7 +106,7 @@ private data class Pending(val prompt: String, val photos: List<Uri>)
  * left, and "Change it" continues the same thread. Scrolling up is the history.
  */
 @Composable
-fun DrawScreen(api: Api, onForget: () -> Unit) {
+fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val gallery = remember { mutableStateListOf<Drawing>() }
@@ -145,7 +162,7 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
     }
 
     if (showSettings) {
-        SettingsScreen(api, onBack = { showSettings = false }, onForget = onForget)
+        SettingsScreen(api, store, onBack = { showSettings = false }, onForget = onForget)
         return
     }
     if (showGallery) {
@@ -171,11 +188,14 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
         ) {
             update?.let { v -> item { UpdateBanner(v) { update = null } } }
             if (d == null && p == null) {
+                // The button sends the sample's first request for real, so the thread
+                // starts the same way it just showed; no composer step in between.
                 sampleSession(
                     onTry = {
                         photos.clear()
                         photos.addAll(Example.photos(ctx))
                         prompt = Example.turns[0].prompt
+                        run(fresh = true) { api.newDrawing(prompt, it) }
                     },
                 )
             }
@@ -189,35 +209,54 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                 item { RequestBubble(it.prompt, it.photos) }
                 item { ThinkingBubble(withPhotos = it.photos.isNotEmpty()) }
             }
-            error?.let { e -> item { Text(e, color = MaterialTheme.colorScheme.error) } }
         }
         // Keep the newest bubble in view, like any chat. The sample session is
         // read top-down, so it stays where it starts.
-        LaunchedEffect(d?.turns?.size, p, error, busy) {
+        LaunchedEffect(d?.turns?.size, p, busy) {
             val n = listState.layoutInfo.totalItemsCount
             if (n > 0 && (d != null || p != null)) listState.animateScrollToItem(n - 1)
         }
 
+        // Above the composer, not inside the thread: it must be visible even when
+        // the list is scrolled elsewhere, and it goes away on the next attempt.
+        error?.let { e ->
+            Text(e, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+        }
         Spacer(Modifier.height(8.dp))
         PhotoStrip(photos, enabled = !busy)
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            placeholder = {
-                Text(
-                    when {
-                        photos.isNotEmpty() -> "Put this on my hand and make it pink"
-                        d == null && p == null -> "A purple dragon eating ice cream"
-                        else -> "Change it… make the sky pink"
-                    },
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
-            maxLines = 4,
-            enabled = !busy,
-        )
+        var listening by remember { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it },
+                placeholder = {
+                    Text(
+                        when {
+                            // Example sentences in the kid's own words, so the hint is something she could say.
+                            listening -> "Listening…"
+                            photos.isNotEmpty() -> "این رو بذار روی دستم و صورتیش کن"
+                            d == null && p == null -> "یه اژدهای بنفش که بستنی می‌خوره"
+                            else -> "آسمونش رو صورتی کن"
+                        },
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                minLines = 2,
+                maxLines = 4,
+                enabled = !busy,
+            )
+            Spacer(Modifier.width(8.dp))
+            MicButton(
+                enabled = !busy,
+                language = store.speechLanguage,
+                onListening = { listening = it },
+                // Spoken words continue whatever is already typed.
+                onText = { spoken, base -> prompt = listOf(base.trimEnd(), spoken).filter { it.isNotBlank() }.joinToString(" ") },
+                baseText = { prompt },
+                onError = { error = it.ifBlank { null } },
+            )
+        }
         Spacer(Modifier.height(8.dp))
         // A photo alone is a request too ("draw this"), so photos unlock the button like words do.
         val ready = !busy && (prompt.isNotBlank() || photos.isNotEmpty())
@@ -241,6 +280,61 @@ fun DrawScreen(api: Api, onForget: () -> Unit) {
                 ) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw it!") }
             }
         }
+    }
+}
+
+/**
+ * Tap to talk, like a chat app: the button pulses while listening, words land
+ * in the text box as they are heard, and a pause or a second tap ends it. The
+ * microphone permission is asked on the first tap and never again.
+ */
+@Composable
+private fun MicButton(
+    enabled: Boolean,
+    language: String,
+    onListening: (Boolean) -> Unit,
+    onText: (spoken: String, base: String) -> Unit,
+    baseText: () -> String,
+    onError: (String) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val speech = remember { Speech(ctx) }
+    var listening by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) { onDispose { speech.stop() } }
+
+    fun begin() {
+        val base = baseText()
+        onError("")
+        listening = true; onListening(true)
+        speech.start(
+            language,
+            onText = { onText(it, base) },
+            onDone = { err -> listening = false; onListening(false); err?.let(onError) },
+        )
+    }
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) begin() else onError("The app needs the microphone to hear you.")
+    }
+
+    val pulse by rememberInfiniteTransition(label = "mic").animateFloat(
+        1f, 1.15f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "pulse",
+    )
+    FilledIconButton(
+        onClick = {
+            when {
+                listening -> { speech.stop(); listening = false; onListening(false) }
+                !speech.available -> onError("Voice typing isn't available on this phone.")
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> begin()
+                else -> askMic.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        },
+        enabled = enabled,
+        modifier = Modifier.size(56.dp).scale(if (listening) pulse else 1f),
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = if (listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Icon(if (listening) Icons.Filled.Stop else Icons.Filled.Mic, if (listening) "Stop listening" else "Say it", Modifier.size(28.dp))
     }
 }
 
@@ -307,9 +401,10 @@ private fun ThinkingBubble(withPhotos: Boolean) {
  * kid out. Drawings stay on the server either way.
  */
 @Composable
-private fun SettingsScreen(api: Api, onBack: () -> Unit, onForget: () -> Unit) {
+private fun SettingsScreen(api: Api, store: Store, onBack: () -> Unit, onForget: () -> Unit) {
     var who by remember { mutableStateOf<Whoami?>(null) }
     var confirm by remember { mutableStateOf(false) }
+    var speechLanguage by remember { mutableStateOf(store.speechLanguage) }
     LaunchedEffect(Unit) { who = runCatching { api.whoami() }.getOrNull() }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
@@ -323,6 +418,20 @@ private fun SettingsScreen(api: Api, onBack: () -> Unit, onForget: () -> Unit) {
             supportingContent = { Text(who?.drawings_left_this_hour?.toString() ?: "…") },
         )
         ListItem(headlineContent = { Text("App version") }, supportingContent = { Text(BuildConfig.VERSION_NAME) })
+        ListItem(
+            headlineContent = { Text("Voice language") },
+            supportingContent = {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Speech.LANGUAGES.forEach { (tag, label) ->
+                        FilterChip(
+                            selected = speechLanguage == tag,
+                            onClick = { speechLanguage = tag; store.speechLanguage = tag },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+            },
+        )
         HorizontalDivider(Modifier.padding(vertical = 16.dp))
         Spacer(Modifier.weight(1f))
         OutlinedButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Forget code on this device") }
@@ -360,7 +469,7 @@ private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
  * bubbles a real one uses. Two photos and a sentence, the picture that came
  * back, a follow-up, its picture. It teaches everything at once: photos are
  * a thing, you talk in your own words, and you can keep changing the picture.
- * "Try this one" loads the first request for real.
+ * "Draw this one for me" sends the first request for real.
  */
 private object Example {
     class Sample(val prompt: String, val photos: List<String>, val result: Int, val reply: String)
@@ -406,7 +515,7 @@ private fun LazyListScope.sampleSession(onTry: () -> Unit) {
     }
     item {
         Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-            Button(onClick = onTry) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Try this one") }
+            Button(onClick = onTry) { Icon(Icons.Filled.Brush, null); Spacer(Modifier.size(6.dp)); Text("Draw this one for me") }
         }
     }
 }

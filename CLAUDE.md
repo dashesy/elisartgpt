@@ -42,6 +42,10 @@ per drawing, so "make it blue" edits the same picture.
   thumbnails) on the right, pictures and the model's line on the left,
   "Change it" appends to the same thread. The server records `turns` for this;
   the flat `images`/`photos`/`text` fields remain for older app builds.
+- Voice: a mic button beside the text box runs Android's `SpeechRecognizer`
+  in-app (RECORD_AUDIO, asked once), Persian by default with an English switch
+  in Settings; words stream into the box as they are heard. Hints and the
+  sample are in spoken Persian; UI labels stay English.
 - A request is words plus up to four photos. The app shrinks photos to 1280 px
   JPEG and posts multipart; plain JSON `{"prompt"}` still works for old builds.
   Photos are kept next to the drawing as `in-NNN.jpg`. How the model should

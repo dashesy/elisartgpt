@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
                     if (current == null) {
                         PairScreen(store) { code = it }
                     } else {
-                        DrawScreen(Api(store.serverUrl, current)) {
+                        DrawScreen(Api(store.serverUrl, current), store) {
                             store.code = null
                             code = null
                         }
