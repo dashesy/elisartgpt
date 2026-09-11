@@ -436,34 +436,23 @@ private fun RequestBubble(text: String, photos: List<Any>) {
 private fun ReplyBubble(api: Api, d: Drawing, t: Turn, onTap: (String) -> Unit, speaker: Speaker, speaking: Boolean) {
     val ctx = LocalContext.current
     ReplyBubble(
-        t.images.map { api.authed(api.imageUrl(d, it), ctx) }, t.text,
+        t.images.map { api.authed(api.imageUrl(d, it), ctx) },
+        t.text.ifBlank { if (t.kind == "ask") "Hmm, I have no answer for that one." else if (t.images.isEmpty()) "Hmm, nothing came out that time. Try again?" else "" },
         onTap = { onTap(t.images[it]) },
-        answer = t.kind == "ask", speaker = speaker, speaking = speaking,
+        speaker = speaker, speaking = speaking,
     )
 }
 
 /**
- * What came back, on the left: pictures with a line under them, or, for a
- * question, the answer as a chat bubble with a speaker to hear it read aloud.
+ * What came back, on the left. Always the same message shape: a picture when
+ * there is one, then the words in a bubble with a speaker to hear them. A
+ * drawing and an answer differ only in whether the picture is there.
  */
 @Composable
 private fun ReplyBubble(
     images: List<Any>, text: String, onTap: ((Int) -> Unit)? = null,
-    answer: Boolean = false, speaker: Speaker? = null, speaking: Boolean = false,
+    speaker: Speaker? = null, speaking: Boolean = false,
 ) {
-    if (answer) {
-        Row(Modifier.fillMaxWidth(0.92f), verticalAlignment = Alignment.Bottom) {
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), modifier = Modifier.weight(1f, fill = false)) {
-                Text(text.ifBlank { "Hmm, I have no answer for that one." }, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp))
-            }
-            if (speaker != null && speaker.canSpeak(text)) {
-                IconButton(onClick = { if (speaking) speaker.stop() else speaker.speak(text) }) {
-                    Icon(if (speaking) Icons.Filled.Stop else Icons.Filled.VolumeUp, if (speaking) "Stop" else "Read it to me")
-                }
-            }
-        }
-        return
-    }
     Column(Modifier.fillMaxWidth(0.92f)) {
         images.forEachIndexed { i, m ->
             AsyncImage(
@@ -474,8 +463,20 @@ private fun ReplyBubble(
             )
             Spacer(Modifier.height(6.dp))
         }
-        val line = text.ifBlank { if (images.isEmpty()) "Hmm, nothing came out that time. Try again?" else "" }
-        if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 4.dp))
+        if (text.isNotBlank()) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
+                    modifier = Modifier.weight(1f, fill = false),
+                ) { Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(12.dp)) }
+                if (speaker != null && speaker.canSpeak(text)) {
+                    IconButton(onClick = { if (speaking) speaker.stop() else speaker.speak(text) }) {
+                        Icon(if (speaking) Icons.Filled.Stop else Icons.Filled.VolumeUp, if (speaking) "Stop" else "Read it to me")
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -60,8 +60,9 @@ per drawing, so "make it blue" edits the same picture.
   the `elisart` tag.
 - "Ask" beside "Draw it!" sends the words with `mode=ask`; the server appends a
   words-only marker for the model (`ASK_MARKER`) and records the turn as
-  `kind=ask`; the app shows it as a text bubble with a speaker (`Speaker.kt`,
-  Android TTS, voice picked from the script). Google's engine has no Persian
+  `kind=ask`. Every reply renders the same way: picture if any, then the words
+  in a bubble with a speaker (`Speaker.kt`, Android TTS, voice picked from the
+  script), so a drawing and an answer differ only by the picture. Google's engine has no Persian
   voice, so the speaker shows only where a voice exists.
 - Voice: a mic button beside the text box runs Android's `SpeechRecognizer`
   in-app (RECORD_AUDIO, asked once), Persian by default with an English switch
