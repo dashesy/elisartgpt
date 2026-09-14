@@ -1,6 +1,7 @@
 package art.elisa.ui
 
 import android.content.Intent
+import android.provider.Settings
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -100,6 +101,8 @@ import art.elisa.Media
 import art.elisa.Api
 import art.elisa.ApiError
 import art.elisa.Diagnosis
+import art.elisa.DrawingService
+import art.elisa.Updater
 import art.elisa.AppVersion
 import art.elisa.BuildConfig
 import art.elisa.Drawing
@@ -160,6 +163,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
     fun track(sent: Pending, before: Drawing?, action: suspend () -> Drawing) {
         busy = true; error = null; failure = null
         pending = sent
+        DrawingService.begin(ctx)
         scope.launch {
             try {
                 val d = action()
@@ -173,6 +177,10 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                         runCatching { Media.saveToPhotos(ctx, api.bytes(api.imageUrl(d, name)), "elisa-${d.id}-$name") }
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // The screen is going away (rotation, or the app is being torn
+                // down); the server keeps drawing and the next screen picks it up.
+                throw e
             } catch (e: Exception) {
                 current = before
                 prompt = sent.prompt
@@ -184,6 +192,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                     error = "Couldn't reach the server."
                 }
             } finally {
+                DrawingService.end(ctx)
                 pending = null
                 busy = false
             }
@@ -259,12 +268,17 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
 
         val d = current
         val p = pending
+        // Above the thread, not in it: the thread scrolls to its newest bubble,
+        // which would carry the banner off the top of any real conversation.
+        update?.let { v ->
+            UpdateBanner(v, api, onDismiss = { update = null }, onError = { error = it })
+            Spacer(Modifier.height(8.dp))
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            update?.let { v -> item { UpdateBanner(v) { update = null } } }
             if (d == null && p == null) sampleSession()
             d?.turns?.forEach { t ->
                 if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) {
@@ -290,7 +304,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
             val target = scrollTo
             if (d != null && target != null) {
                 scrollTo = null
-                listState.scrollToItem(itemIndexOf(d, target, hasBanner = update != null))
+                listState.scrollToItem(itemIndexOf(d, target))
             } else if (d != null || p != null) {
                 val n = listState.layoutInfo.totalItemsCount
                 if (n > 0) listState.animateScrollToItem(n - 1)
@@ -412,8 +426,8 @@ private fun MicButton(
 }
 
 /** Which list item shows the turn holding [image]: the banner, then a request and a reply per turn. */
-private fun itemIndexOf(d: Drawing, image: String, hasBanner: Boolean): Int {
-    var i = if (hasBanner) 1 else 0
+private fun itemIndexOf(d: Drawing, image: String): Int {
+    var i = 0
     for (t in d.turns) {
         if (t.prompt.isNotBlank() || t.photos.isNotEmpty()) i++
         if (image in t.images) return i
@@ -634,8 +648,24 @@ private fun SettingsScreen(api: Api, store: Store, onBack: () -> Unit, onForget:
 
 /** Opens the APK link in the browser; Android's installer takes over from there. */
 @Composable
-private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
+private fun UpdateBanner(v: AppVersion, api: Api, onDismiss: () -> Unit, onError: (String) -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var downloading by remember { mutableStateOf(false) }
+    val install = {
+        downloading = true
+        scope.launch {
+            runCatching { Updater.install(ctx, api, v) }
+                .onFailure { onError("Couldn't download the update. Try again later.") }
+            downloading = false
+        }
+    }
+    // Installing from inside an app needs a one-time toggle in Settings. Asked
+    // for up front and continued on return, so one tap on Update is the whole story.
+    val allowed = { ctx.packageManager.canRequestPackageInstalls() }
+    val askToAllow = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (allowed()) install()
+    }
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)),
@@ -643,7 +673,12 @@ private fun UpdateBanner(v: AppVersion, onDismiss: () -> Unit) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("New version ${v.versionName} is out!", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = onDismiss) { Text("Later") }
-            Button(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(v.url))) }) { Text("Update") }
+            // The banner stays until the new build is really running: it is checked
+            // against this build's own version on every launch, not remembered.
+            Button(enabled = !downloading, onClick = {
+                if (allowed()) install()
+                else askToAllow.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")))
+            }) { Text(if (downloading) "Downloading…" else "Update") }
         }
     }
 }

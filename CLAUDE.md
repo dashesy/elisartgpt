@@ -52,7 +52,11 @@ per drawing, so "make it blue" edits the same picture.
   for that one". This is why a socket Android tears down mid-drawing (the
   `Software caused connection abort` from a network switch) costs nothing, and
   why a request still running when the app reopens is shown and picked up.
-  Old builds omit `wait` and get the finished drawing as before.
+  While a request runs, `DrawingService` (a foreground service with a
+  "drawing…" notification) keeps the app from being frozen in the background,
+  so the picture arrives and is saved even with another app on screen; and
+  patience is counted in polls made, not on the clock, so time spent frozen
+  does not count. Old builds omit `wait` and get the finished drawing as before.
 - Gallery is every picture (newest first), not one tile per drawing. Tapping a
   picture anywhere opens a full-screen viewer with Share (Android sheet), Save
   (Pictures/Elisa Art via MediaStore), Delete drawing (server `DELETE`), and
@@ -88,6 +92,13 @@ per drawing, so "make it blue" edits the same picture.
   real bubbles (two photos + Persian sentence -> pink wristband -> "add stars"
   -> stars), with no captions; "Draw it!" is the only send button. Its photos
   ship in `res/raw`.
+- Updates: the app checks `/app/version` on launch and shows a banner above the
+  chat (not inside it, which scrolls away) until the running build is current.
+  "Update" downloads the APK through the app's own client and hands it to the
+  package installer (`Updater`, `REQUEST_INSTALL_PACKAGES`); the first time,
+  Android's "allow from this source" toggle is opened and the install continues
+  on return. Never send people to the browser for it: the file lands in
+  Downloads and the old build keeps running.
 - People authenticate with an invite code (`make code NAME=elisa`), sent as a
   bearer token and stored hashed in `data/codes.json`. Each code owns its own
   gallery and hourly quota. The app ships with the server URL and asks only
@@ -114,6 +125,7 @@ make emu-test       # on-device tests: the client against a fake server that dro
 adb -e exec-out screencap -p > shot.png    # see the screen (Read the PNG)
 adb -e shell input tap X Y / input text 'a%sb' / input keyevent KEYCODE_BACK
 adb -e logcat -d -s AndroidRuntime:E        # crashes
+adb -e shell am freeze art.elisa / am unfreeze art.elisa   # what the OS does to a backgrounded app
 make emu-stop
 ```
 
