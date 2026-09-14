@@ -19,6 +19,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -85,6 +86,23 @@ class TurnResilienceTest {
         assertTrue("polled until it was done", polls.get() >= 3)
         // The app itself never re-posts: it goes looking for the drawing it named.
         assertEquals(12, d.id.length)
+    }
+
+    @Test fun time_spent_frozen_in_the_background_does_not_count_against_a_lost_send() = runBlocking {
+        // The send died (the app was frozen and its socket destroyed); coming back,
+        // the first poll stalls past the whole grace period before failing too. Only
+        // polls made may count, or this would be called "never got through".
+        val polls = AtomicInteger()
+        serve { req, id ->
+            when {
+                req.method == "POST" -> drop()
+                polls.incrementAndGet() == 1 -> drop().setHeadersDelay(hurry.graceMs + 500, TimeUnit.MILLISECONDS)
+                polls.get() < 3 -> json(pending(id))
+                else -> json(done(id, 1))
+            }
+        }
+        val d = api().turn(null, "a cat")
+        assertEquals(1, d.turns.size)
     }
 
     @Test fun a_change_sent_again_while_the_server_is_still_on_it_waits_for_that_picture() = runBlocking {

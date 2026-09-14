@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Talk instead of type: the app records for the system speech recognizer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- A drawing keeps going while the person is in another app (DrawingService). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Updates install from inside the app (Updater); Android asks once to allow it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Saving into Pictures/Elisa Art needs this only on Android 9 and older. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <!-- Let the system camera app be found on Android 11+; no CAMERA permission needed for it. -->

@@ -50,10 +50,11 @@ private data class PromptBody(val prompt: String, val mode: String = "draw", val
 class ApiError(val status: Int, message: String) : IOException(message)
 
 /**
- * How long to keep asking after a request. A drawing takes 30-90 s and the
- * server gives up at five minutes, so the deadline sits past that; the grace
- * is how long to look for a request whose send died before deciding it was
- * never received.
+ * How long to keep asking after a request, counted in polls actually made, not
+ * on the clock: a frozen app makes no polls, and the minutes it spent frozen
+ * must not count against it. A drawing takes 30-90 s and the server gives up
+ * at five minutes, so the deadline sits past that; the grace is how long to
+ * look for a request whose send died before deciding it was never received.
  */
 data class Patience(val pollMs: Long = 2_500, val graceMs: Long = 20_000, val deadlineMs: Long = 6 * 60_000)
 
@@ -141,13 +142,13 @@ class Api(val baseUrl: String, private val code: String, private val patience: P
      * error the send died with, when it is not known whether the server got it.
      */
     suspend fun awaitTurn(id: String, before: Int, lost: IOException? = null): Drawing {
-        val started = System.currentTimeMillis()
         var landed = lost == null
         var answered = false
         var lastFailure: IOException? = lost
+        var tried = 0
         while (true) {
             delay(patience.pollMs)
-            val elapsed = System.currentTimeMillis() - started
+            val elapsed = ++tried * patience.pollMs
             val d = try {
                 get<Drawing>("/drawings/$id")
             } catch (e: ApiError) {

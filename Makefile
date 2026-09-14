@@ -104,6 +104,8 @@ emu-install: apk ## Install the release APK on the emulator and launch it
 
 emu-test: ## Run the on-device tests (turn resilience) on the emulator; boots it if needed
 	@$(ADB) -e get-state >/dev/null 2>&1 || $(MAKE) emu
+	@# A release build left by emu-install is signed with another key and blocks the debug test install.
+	@$(ADB) -e uninstall art.elisa >/dev/null 2>&1 || true
 	cd android && ./gradlew -q connectedDebugAndroidTest && echo "on-device tests passed"
 
 emu-stop: ## Shut the emulator down
