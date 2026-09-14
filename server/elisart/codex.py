@@ -159,6 +159,10 @@ async def run_turn(
     except TimeoutError:
         proc.kill()
         return TurnResult(thread_id=thread_id, error=f"codex timed out after {timeout:.0f}s")
+    except asyncio.CancelledError:
+        # The drawing was deleted under us; do not leave codex painting for nobody.
+        proc.kill()
+        raise
 
     result = parse_events(stdout.decode(errors="replace").splitlines())
     if result.thread_id is None:

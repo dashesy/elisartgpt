@@ -1,3 +1,5 @@
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -241,3 +243,103 @@ def test_ask_is_answered_in_words(client, code, tmp_path, monkeypatch):
     # Old builds send no mode and get a drawing turn with a clean prompt.
     client.post("/drawings", json={"prompt": "a cat"}, headers=h)
     assert seen["prompt"] == "a cat"
+
+
+def _settle(client, h, drawing_id: str) -> dict:
+    """Poll like the phone does until the server is done with the drawing."""
+    for _ in range(100):
+        d = client.get(f"/drawings/{drawing_id}", headers=h).json()
+        if d["pending"] is None:
+            return d
+        time.sleep(0.02)
+    raise AssertionError("turn never finished")
+
+
+def test_turn_runs_in_the_background_and_is_polled_for(client, code, tmp_path, monkeypatch):
+    png = tmp_path / "gen.png"
+    png.write_bytes(b"png")
+    calls = []
+
+    async def slow(prompt, **kw):
+        calls.append(prompt)
+        await asyncio.sleep(0.15)
+        return TurnResult(thread_id="thr", text="A cat!", images=[png])
+
+    monkeypatch.setattr(codex, "run_turn", slow)
+    h = {"Authorization": f"Bearer {code}"}
+    body = {"prompt": "a cat", "id": "abcdef012345"}
+    r = client.post("/drawings?wait=false", json=body, headers=h)
+    assert r.status_code == 202, r.text
+    d = r.json()
+    assert d["id"] == "abcdef012345" and d["turns"] == [] and d["images"] == []
+    assert d["pending"]["prompt"] == "a cat" and d["pending"]["kind"] == "draw"
+    # Visible to a poll, and in the list, while it runs.
+    assert client.get("/drawings/abcdef012345", headers=h).json()["pending"]["prompt"] == "a cat"
+    assert client.get("/drawings", headers=h).json()[0]["pending"]["prompt"] == "a cat"
+    # The same request again (the phone lost the answer) is not drawn twice...
+    again = client.post("/drawings?wait=false", json=body, headers=h)
+    assert again.status_code == 202 and again.json()["pending"]["prompt"] == "a cat"
+    # ...and a different one on the same drawing is told to wait, not handed to codex.
+    r2 = client.post("/drawings/abcdef012345/turns?wait=false", json={"prompt": "bluer"}, headers=h)
+    assert r2.status_code == 409, r2.text
+
+    d = _settle(client, h, "abcdef012345")
+    assert d["turns"][0]["images"] == ["001.png"] and d["turns"][0]["text"] == "A cat!"
+    assert d["error"] is None and calls == ["a cat"]
+    # Charged once. The pending marker is not written to disk.
+    assert client.get("/whoami", headers=h).json()["drawings_left_this_hour"] == 1
+    assert (
+        "pending"
+        not in (tmp_path / "drawings" / "elisa" / "abcdef012345" / "meta.json").read_text()
+    )
+    # Once finished, re-sending the original request just returns the drawing.
+    assert client.post("/drawings?wait=false", json=body, headers=h).status_code == 200
+
+
+def test_a_failed_background_turn_leaves_the_error_on_the_drawing(client, code, monkeypatch):
+    async def broken(prompt, **kw):
+        await asyncio.sleep(0.05)
+        return TurnResult(thread_id="thr", error="codex fell over")
+
+    monkeypatch.setattr(codex, "run_turn", broken)
+    h = {"Authorization": f"Bearer {code}"}
+    d = client.post("/drawings?wait=false", json={"prompt": "a cat"}, headers=h).json()
+    d = _settle(client, h, d["id"])
+    assert d["turns"] == [] and d["error"] == "codex fell over"
+    # Old builds that wait get the same failure as before.
+    assert client.post("/drawings", json={"prompt": "a dog"}, headers=h).status_code == 502
+
+
+def test_bad_client_ids_are_refused(client, code):
+    h = {"Authorization": f"Bearer {code}"}
+    assert (
+        client.post("/drawings", json={"prompt": "x", "id": "../etc"}, headers=h).status_code == 422
+    )
+    assert (
+        client.post("/drawings", json={"prompt": "x", "id": "ABCDEF012345"}, headers=h).status_code
+        == 422
+    )
+    assert client.get("/drawings/abcdef012345", headers=h).status_code == 404
+
+
+def test_deleting_a_drawing_stops_its_turn(client, code, monkeypatch):
+    stopped = asyncio.Event()
+
+    async def forever(prompt, **kw):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+        return TurnResult(thread_id="thr")
+
+    monkeypatch.setattr(codex, "run_turn", forever)
+    h = {"Authorization": f"Bearer {code}"}
+    d = client.post("/drawings?wait=false", json={"prompt": "a cat"}, headers=h).json()
+    assert client.delete(f"/drawings/{d['id']}", headers=h).status_code == 204
+    for _ in range(100):
+        if stopped.is_set():
+            break
+        time.sleep(0.02)
+    assert stopped.is_set() and d["id"] not in main.jobs
+    assert client.get(f"/drawings/{d['id']}", headers=h).status_code == 404

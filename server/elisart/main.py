@@ -1,8 +1,11 @@
+import asyncio
+import re
 import shutil
 import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Annotated
@@ -47,6 +50,12 @@ class Prompt(BaseModel):
     prompt: str
     # "draw" (default) or "ask": a question answered in words, no picture.
     mode: str = "draw"
+    # For a new drawing the phone may pick the id itself, so a request whose
+    # answer never arrived can be looked up, or sent again without drawing twice.
+    id: str | None = None
+
+
+DRAWING_ID = re.compile(r"[0-9a-f]{12}")
 
 
 # Photos a person attaches to a request. Phones downscale before uploading, so
@@ -78,6 +87,9 @@ class Drawing(BaseModel):
     # flattened view older app builds still read.
     turns: list[Turn] = []
     error: str | None = None
+    # The request being worked on right now, if any. Never stored: it lives in
+    # `jobs` and is attached on every read.
+    pending: Turn | None = None
 
 
 class AppVersion(BaseModel):
@@ -109,6 +121,8 @@ def _load(user: str, drawing_id: str) -> Drawing:
     if d.images and (not d.turns or any(not t.prompt and not t.photos for t in d.turns)):
         d.turns = _backfill_turns(d, path.stat().st_mtime)
         _save(user, d)
+    if job := jobs.get(d.id):
+        d.pending = job.turn
     return d
 
 
@@ -136,7 +150,7 @@ def _backfill_turns(d: Drawing, mtime: float) -> list[Turn]:
 def _save(user: str, d: Drawing) -> None:
     path = _meta_path(user, d.id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(d.model_dump_json(indent=2))
+    path.write_text(d.model_dump_json(indent=2, exclude={"pending"}))
 
 
 def _usage_file(user: str) -> Path:
@@ -243,10 +257,17 @@ def list_drawings(user: User) -> list[Drawing]:
     return sorted(items, key=lambda d: _meta_path(user, d.id).stat().st_mtime, reverse=True)
 
 
-async def _read_request(request: Request) -> tuple[str, list[UploadFile], bool]:
-    """A request is JSON (`{"prompt", "mode"}`, what older phones send without
-    mode) or a form with `prompt`, optional `mode` and up to MAX_PHOTOS `photos`.
-    Returns the words, the photos and whether it is a question rather than a drawing."""
+@app.get("/drawings/{drawing_id}")
+def get_drawing(user: User, drawing_id: str) -> Drawing:
+    """What the phone polls while a request runs: `pending` until the reply lands."""
+    return _load(user, drawing_id)
+
+
+async def _read_request(request: Request) -> tuple[str, list[UploadFile], bool, str | None]:
+    """A request is JSON (`{"prompt", "mode", "id"}`; older phones send only the
+    prompt) or a form with `prompt`, optional `mode` and `id`, and up to
+    MAX_PHOTOS `photos`. Returns the words, the photos, whether it is a question
+    rather than a drawing, and the id the phone chose for a new drawing."""
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = Prompt.model_validate_json(await request.body())
@@ -254,7 +275,7 @@ async def _read_request(request: Request) -> tuple[str, list[UploadFile], bool]:
             raise HTTPException(422, "bad request body") from e
         if not body.prompt.strip():
             raise HTTPException(422, "say what to draw, or add a photo")
-        return body.prompt.strip(), [], body.mode == "ask"
+        return body.prompt.strip(), [], body.mode == "ask", _drawing_id(body.id)
     form = await request.form()
     photos = [f for f in form.getlist("photos") if isinstance(f, UploadFile)]
     if len(photos) > MAX_PHOTOS:
@@ -267,7 +288,15 @@ async def _read_request(request: Request) -> tuple[str, list[UploadFile], bool]:
     prompt = str(form.get("prompt", "")).strip()
     if not prompt and not photos:
         raise HTTPException(422, "say what to draw, or add a photo")
-    return prompt, photos, form.get("mode") == "ask"
+    return prompt, photos, form.get("mode") == "ask", _drawing_id(form.get("id"))
+
+
+def _drawing_id(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or not DRAWING_ID.fullmatch(value):
+        raise HTTPException(422, "bad drawing id")
+    return value
 
 
 async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[Path]:
@@ -287,9 +316,25 @@ async def _save_photos(user: str, d: Drawing, photos: list[UploadFile]) -> list[
 ASK_MARKER = "\n\n[Just answer in words this time. No picture.]"
 
 
-async def _turn(
-    user: str, d: Drawing, prompt: str, photos: list[UploadFile], ask: bool = False
-) -> Drawing:
+@dataclass
+class Job:
+    turn: Turn
+    task: asyncio.Task[Drawing]
+
+
+# Requests in progress, by drawing id. A turn runs as its own task so a phone
+# whose connection dies half-way (a minute is a long time on a bad network)
+# can come back and collect the picture; and so a second request on the same
+# drawing is refused here rather than by codex's thread lock, mid-turn. A
+# restart loses them together with the codex processes they wait on.
+jobs: dict[str, Job] = {}
+
+
+async def _start_turn(
+    user: str, d: Drawing, prompt: str, photos: list[UploadFile], ask: bool
+) -> Job:
+    if d.id in jobs:
+        raise HTTPException(409, "still working on the last request, give it a moment")
     if _turns_last_hour(user) >= settings.rate_limit_per_hour:
         raise HTTPException(429, "that's enough drawings for this hour, try again later")
     _record_turn(user)
@@ -300,46 +345,92 @@ async def _turn(
         photos=[p.name for p in photo_paths],
         at=time.time(),
     )
+    # On disk from now on, so a phone asking about it finds it before codex answers.
+    _save(user, d)
+    job = Job(turn, asyncio.create_task(_finish_turn(user, d, turn, photo_paths, ask)))
+    jobs[d.id] = job
+    return job
+
+
+async def _finish_turn(
+    user: str, d: Drawing, turn: Turn, photo_paths: list[Path], ask: bool
+) -> Drawing:
     # A photo with no words is a complete request; give the model something to answer.
-    words = prompt or (
+    words = turn.prompt or (
         "Tell me about these photos." if ask else "Draw a picture from these photos."
     )
-    result = await codex.run_turn(
-        words + (ASK_MARKER if ask else ""),
-        workspace=settings.workspace_dir,
-        codex_home=settings.codex_home,
-        codex_bin=settings.codex_bin,
-        thread_id=d.thread_id,
-        images=photo_paths,
-    )
-    d.thread_id = result.thread_id
-    d.text = result.text
-    d.error = result.error
-    dest = _user_dir(user) / d.id
-    for src in result.images:
-        name = f"{len(d.images) + 1:03d}.png"
-        shutil.copy2(src, dest / name)
-        d.images.append(name)
-        turn.images.append(name)
-    turn.text = result.text
-    d.turns.append(turn)
-    _save(user, d)
-    if d.error and not result.images and not (ask and result.text):
-        raise HTTPException(502, d.error)
+    try:
+        result = await codex.run_turn(
+            words + (ASK_MARKER if ask else ""),
+            workspace=settings.workspace_dir,
+            codex_home=settings.codex_home,
+            codex_bin=settings.codex_bin,
+            thread_id=d.thread_id,
+            images=photo_paths,
+        )
+        d.thread_id = result.thread_id
+        d.text = result.text
+        d.error = result.error
+        dest = _user_dir(user) / d.id
+        for src in result.images:
+            name = f"{len(d.images) + 1:03d}.png"
+            shutil.copy2(src, dest / name)
+            d.images.append(name)
+            turn.images.append(name)
+        turn.text = result.text
+        # Nothing came back: the error is the record, not an empty exchange.
+        if result.images or not d.error or (ask and result.text):
+            d.turns.append(turn)
+        _save(user, d)
+    except asyncio.CancelledError:
+        # Deleted while drawing; nothing left to write into.
+        raise
+    except Exception as e:  # noqa: BLE001 - whatever it was, the phone must hear of it
+        d.error = f"{type(e).__name__}: {e}"
+        _save(user, d)
+    finally:
+        jobs.pop(d.id, None)
+    return d
+
+
+async def _respond(d: Drawing, job: Job, wait: bool, response: Response, before: int) -> Drawing:
+    """`wait=false` (current phones): 202 with the request as `pending`, to be
+    polled for. Without it (older builds): the finished drawing, as always."""
+    if not wait:
+        response.status_code = 202
+        return d.model_copy(update={"pending": job.turn})
+    # Shielded: the drawing finishes even if this request is torn down.
+    d = await asyncio.shield(job.task)
+    if len(d.turns) == before:
+        raise HTTPException(502, d.error or "nothing came back")
     return d
 
 
 @app.post("/drawings")
-async def new_drawing(user: User, request: Request) -> Drawing:
-    prompt, photos, ask = await _read_request(request)
-    d = Drawing(id=uuid.uuid4().hex[:12], thread_id=None, text="", images=[])
-    return await _turn(user, d, prompt, photos, ask)
+async def new_drawing(
+    user: User, request: Request, response: Response, wait: bool = True
+) -> Drawing:
+    prompt, photos, ask, client_id = await _read_request(request)
+    if client_id and _meta_path(user, client_id).exists():
+        # The phone is re-sending a request the first attempt already delivered;
+        # hand back what it has rather than drawing it twice.
+        d = _load(user, client_id)
+        job = jobs.get(d.id)
+        return await _respond(d, job, wait, response, len(d.turns)) if job else d
+    d = Drawing(id=client_id or uuid.uuid4().hex[:12], thread_id=None, text="", images=[])
+    job = await _start_turn(user, d, prompt, photos, ask)
+    return await _respond(d, job, wait, response, before=0)
 
 
 @app.post("/drawings/{drawing_id}/turns")
-async def continue_drawing(user: User, drawing_id: str, request: Request) -> Drawing:
-    prompt, photos, ask = await _read_request(request)
-    return await _turn(user, _load(user, drawing_id), prompt, photos, ask)
+async def continue_drawing(
+    user: User, drawing_id: str, request: Request, response: Response, wait: bool = True
+) -> Drawing:
+    prompt, photos, ask, _ = await _read_request(request)
+    d = _load(user, drawing_id)
+    before = len(d.turns)
+    job = await _start_turn(user, d, prompt, photos, ask)
+    return await _respond(d, job, wait, response, before)
 
 
 @app.delete("/drawings/{drawing_id}", status_code=204)
@@ -347,6 +438,8 @@ def delete_drawing(user: User, drawing_id: str) -> None:
     """Removes the pictures, photos and conversation record. The codex thread
     itself stays in codex's own logs; nothing here points at it any more."""
     _load(user, drawing_id)
+    if job := jobs.pop(drawing_id, None):
+        job.task.cancel()
     shutil.rmtree(_user_dir(user) / drawing_id)
 
 
