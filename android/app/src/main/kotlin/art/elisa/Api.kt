@@ -1,6 +1,7 @@
 package art.elisa
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -32,6 +33,8 @@ data class Drawing(
     val photos: List<String> = emptyList(),
     val turns: List<Turn> = emptyList(),
     val error: String? = null,
+    /** The request the server is still working on, if any. */
+    val pending: Turn? = null,
 )
 
 @Serializable
@@ -41,9 +44,18 @@ data class Whoami(val name: String, val drawings_left_this_hour: Int)
 data class AppVersion(val versionCode: Int, val versionName: String, val url: String)
 
 @Serializable
-private data class PromptBody(val prompt: String, val mode: String = "draw")
+private data class PromptBody(val prompt: String, val mode: String = "draw", val id: String? = null)
 
+/** An answer from the server that is not the one hoped for; [status] 0 means it never got there. */
 class ApiError(val status: Int, message: String) : IOException(message)
+
+/**
+ * How long to keep asking after a request. A drawing takes 30-90 s and the
+ * server gives up at five minutes, so the deadline sits past that; the grace
+ * is how long to look for a request whose send died before deciding it was
+ * never received.
+ */
+data class Patience(val pollMs: Long = 2_500, val graceMs: Long = 20_000, val deadlineMs: Long = 6 * 60_000)
 
 /**
  * The server's name spells out its own address (`1-2-3-4.sslip.io`), so the
@@ -73,7 +85,7 @@ val httpClient: OkHttpClient by lazy {
 }
 
 /** Thin client for the elisart server. The invite code is the bearer token. */
-class Api(val baseUrl: String, private val code: String) {
+class Api(val baseUrl: String, private val code: String, private val patience: Patience = Patience()) {
     private val json = Json { ignoreUnknownKeys = true }
     private val client = httpClient
 
@@ -100,20 +112,80 @@ class Api(val baseUrl: String, private val code: String) {
             resp.body!!.bytes()
         }
     }
-    /** [ask] sends a question to be answered in words instead of a picture. */
-    suspend fun newDrawing(prompt: String, photos: List<ByteArray> = emptyList(), ask: Boolean = false): Drawing =
-        post("/drawings", body(prompt, photos, ask))
-    suspend fun continueDrawing(id: String, prompt: String, photos: List<ByteArray> = emptyList(), ask: Boolean = false): Drawing =
-        post("/drawings/$id/turns", body(prompt, photos, ask))
+    /**
+     * One request, start to finish, on drawing [on] or a new one. The server
+     * answers at once and draws in the background; we poll the drawing until
+     * the reply lands. So a connection that dies half-way (a minute is a long
+     * time on a bad network) costs nothing: the next poll finds the picture. A
+     * new drawing carries an id chosen here, so even a request whose answer was
+     * lost can be found again. [ask] wants words back instead of a picture.
+     */
+    suspend fun turn(on: Drawing?, prompt: String, photos: List<ByteArray> = emptyList(), ask: Boolean = false): Drawing {
+        val id = on?.id ?: newId()
+        val path = if (on == null) "/drawings?wait=false" else "/drawings/$id/turns?wait=false"
+        val lost = try {
+            post<Drawing>(path, body(prompt, photos, ask, id.takeIf { on == null }))
+            null
+        } catch (e: ApiError) {
+            // 409: the server is still on this drawing's last request, most likely
+            // this very one sent again after a drop. Its picture is the one to wait for.
+            if (e.status == 409) null else throw e
+        } catch (e: IOException) {
+            e
+        }
+        return awaitTurn(id, on?.turns?.size ?: 0, lost)
+    }
+
+    /**
+     * Polls drawing [id] until it has more than [before] turns. [lost] is the
+     * error the send died with, when it is not known whether the server got it.
+     */
+    suspend fun awaitTurn(id: String, before: Int, lost: IOException? = null): Drawing {
+        val started = System.currentTimeMillis()
+        var landed = lost == null
+        var answered = false
+        var lastFailure: IOException? = lost
+        while (true) {
+            delay(patience.pollMs)
+            val elapsed = System.currentTimeMillis() - started
+            val d = try {
+                get<Drawing>("/drawings/$id")
+            } catch (e: ApiError) {
+                // A new drawing the server never heard of: keep looking during the grace.
+                if (e.status == 404 && !landed) { answered = true; null } else throw e
+            } catch (e: IOException) {
+                lastFailure = e
+                null
+            }
+            if (d != null) {
+                answered = true
+                if (d.turns.size > before) return d
+                if (d.pending != null) landed = true
+                else if (landed) throw ApiError(502, d.error ?: "Nothing came back. Try again.")
+            }
+            if (!landed && elapsed > patience.graceMs) {
+                // Never reached the server: a real outage if nothing answered at all,
+                // otherwise a send that simply has to be repeated.
+                throw if (answered) ApiError(0, "That didn't get through. Try again.")
+                else lastFailure ?: ApiError(0, "That didn't get through. Try again.")
+            }
+            if (landed && elapsed > patience.deadlineMs) {
+                throw lastFailure ?: ApiError(504, "This is taking too long. Check the gallery in a minute.")
+            }
+        }
+    }
+
+    private fun newId() = java.util.UUID.randomUUID().toString().replace("-", "").take(12)
 
     /** JSON when there is only text (what the server always accepted), multipart with photos. */
-    private fun body(prompt: String, photos: List<ByteArray>, ask: Boolean): RequestBody {
+    private fun body(prompt: String, photos: List<ByteArray>, ask: Boolean, id: String?): RequestBody {
         val mode = if (ask) "ask" else "draw"
         if (photos.isEmpty()) {
-            return json.encodeToString(PromptBody.serializer(), PromptBody(prompt, mode))
+            return json.encodeToString(PromptBody.serializer(), PromptBody(prompt, mode, id))
                 .toRequestBody("application/json".toMediaType())
         }
         val b = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("prompt", prompt).addFormDataPart("mode", mode)
+        id?.let { b.addFormDataPart("id", it) }
         photos.forEachIndexed { i, bytes ->
             b.addFormDataPart("photos", "photo-$i.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))
         }

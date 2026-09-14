@@ -43,6 +43,16 @@ per drawing, so "make it blue" edits the same picture.
   it!" always sends into the open thread; "+" in the top bar starts a new one
   (like a new chat), so the send button never asks "same or new". The server records `turns` for this;
   the flat `images`/`photos`/`text` fields remain for older app builds.
+- A turn is a background job on the server, never a long request. The app
+  posts with `?wait=false`, gets 202 with the request as `pending`, and polls
+  `GET /drawings/{id}` until the turn lands (`Api.turn` / `awaitTurn`,
+  `Patience` sets the pace). A new drawing carries an id the app chose, so a
+  send whose answer was lost is found again, or re-sent without drawing twice;
+  a second request on a busy drawing gets 409, which the app reads as "wait
+  for that one". This is why a socket Android tears down mid-drawing (the
+  `Software caused connection abort` from a network switch) costs nothing, and
+  why a request still running when the app reopens is shown and picked up.
+  Old builds omit `wait` and get the finished drawing as before.
 - Gallery is every picture (newest first), not one tile per drawing. Tapping a
   picture anywhere opens a full-screen viewer with Share (Android sheet), Save
   (Pictures/Elisa Art via MediaStore), Delete drawing (server `DELETE`), and
@@ -100,6 +110,7 @@ An Android emulator is set up on the Mac (SDK at `~/Library/Android/sdk`, AVD
 make emu            # boot headless (no window); ~20 s to Android
 make emu-gui        # same, with a window, for a human to look at
 make emu-install    # build + install the release APK and launch the app
+make emu-test       # on-device tests: the client against a fake server that drops connections
 adb -e exec-out screencap -p > shot.png    # see the screen (Read the PNG)
 adb -e shell input tap X Y / input text 'a%sb' / input keyevent KEYCODE_BACK
 adb -e logcat -d -s AndroidRuntime:E        # crashes
@@ -124,7 +135,9 @@ Gradle/adb tooling needs `JAVA_HOME` (`mise where java`); and a fresh AVD has
   stable). There is no image event; the file appears under
   `$CODEX_HOME/generated_images/<thread_id>/`.
 - `codex exec resume <thread_id> "<prompt>"` continues a thread; do not pass
-  `--ephemeral` or the thread is not persisted.
+  `--ephemeral` or the thread is not persisted. A thread is locked while a
+  process is on it (`$CODEX_HOME/thread-writer-locks`): a second `resume` fails
+  at once, which is what the server's 409 on a busy drawing prevents.
 - Reference photos go in with `-i <file>` (repeatable, works on `resume` too);
   the prompt follows `--` because `-i` is variadic. `image_gen` uses them as
   input, so "put this wristband on my hand" with two photos really composites.

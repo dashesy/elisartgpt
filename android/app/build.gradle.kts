@@ -49,6 +49,7 @@ android {
         // empty (a CI or stranger's build) hides the button.
         val supportEmail = dotenv.getProperty("ELISART_SUPPORT_EMAIL") ?: ""
         buildConfigField("String", "SUPPORT_EMAIL", "\"$supportEmail\"")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -106,4 +107,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // On-device tests (`make emu-test`): the client against a fake server that drops connections.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

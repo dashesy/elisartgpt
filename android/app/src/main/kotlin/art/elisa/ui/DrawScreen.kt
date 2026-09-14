@@ -111,7 +111,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
 /** What was just sent and is still being drawn; shown as a bubble until the reply lands. */
-private data class Pending(val prompt: String, val photos: List<Uri>)
+/** A request in flight: the words, the photos picked here, and (when the server
+ *  is finishing one from an earlier session) the photos it already has. */
+private data class Pending(val prompt: String, val photos: List<Uri>, val remote: List<Any> = emptyList())
 
 /** A picture opened full screen; from the gallery it can also jump into its thread. */
 private data class Viewing(val d: Drawing, val name: String, val fromGallery: Boolean)
@@ -153,32 +155,14 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        runCatching { gallery.addAll(api.drawings()) }
-        // Reopen where we left off: the newest drawing, so "Change it" still works.
-        if (current == null) current = gallery.firstOrNull { it.images.isNotEmpty() }
-        // Sideloaded apps never update themselves; this is the whole update story.
-        runCatching { api.appVersion() }.getOrNull()
-            ?.takeIf { it.versionCode > BuildConfig.VERSION_CODE }
-            ?.let { update = it }
-    }
-
-    // The request shows up as a bubble at once; the photos are shrunk while the
-    // spinner is already on screen, where a wait is expected anyway.
-    fun run(fresh: Boolean, block: suspend (String, List<ByteArray>) -> Drawing) {
-        if (busy) return
+    // Shows [sent] as a bubble with a spinner until [action] brings the reply,
+    // then makes that drawing the open one; on failure the composer gets its words back.
+    fun track(sent: Pending, before: Drawing?, action: suspend () -> Drawing) {
         busy = true; error = null; failure = null
-        // Like any chat: the composer empties on send, and refills if the send fails.
-        val sent = Pending(prompt, photos.toList())
         pending = sent
-        prompt = ""
-        photos.clear()
-        val before = current
-        if (fresh) current = null
         scope.launch {
             try {
-                // From `sent`, not the state: the composer was just cleared.
-                val d = block(sent.prompt, sent.photos.map { Photos.shrink(ctx, it) })
+                val d = action()
                 current = d
                 gallery.removeAll { it.id == d.id }
                 gallery.add(0, d)
@@ -204,6 +188,39 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 busy = false
             }
         }
+    }
+
+    // The request shows up as a bubble at once; the photos are shrunk while the
+    // spinner is already on screen, where a wait is expected anyway.
+    fun run(target: Drawing?, ask: Boolean) {
+        if (busy) return
+        // Like any chat: the composer empties on send, and refills if the send fails.
+        val sent = Pending(prompt, photos.toList())
+        prompt = ""
+        photos.clear()
+        val before = current
+        if (target == null) current = null
+        // From `sent`, not the state: the composer was just cleared.
+        track(sent, before) { api.turn(target, sent.prompt, sent.photos.map { Photos.shrink(ctx, it) }, ask) }
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { gallery.addAll(api.drawings()) }
+        // Reopen where we left off: the newest drawing, so "Change it" still works.
+        if (current == null) current = gallery.firstOrNull { it.images.isNotEmpty() }
+        // A request the server is still working on from last time (the app was
+        // closed, or the phone lost the network for good): pick it up where it was.
+        gallery.firstOrNull { it.pending != null }?.let { d ->
+            val p = d.pending ?: return@let
+            current = d
+            track(Pending(p.prompt, emptyList(), p.photos.map { api.authed(api.photoUrl(d, it), ctx) }), before = d) {
+                api.awaitTurn(d.id, d.turns.size)
+            }
+        }
+        // Sideloaded apps never update themselves; this is the whole update story.
+        runCatching { api.appVersion() }.getOrNull()
+            ?.takeIf { it.versionCode > BuildConfig.VERSION_CODE }
+            ?.let { update = it }
     }
 
     if (showSettings) {
@@ -262,7 +279,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
                 }
             }
             p?.let {
-                item { RequestBubble(it.prompt, it.photos) }
+                item { RequestBubble(it.prompt, it.photos + it.remote) }
                 item { ThinkingBubble() }
             }
         }
@@ -327,10 +344,7 @@ fun DrawScreen(api: Api, store: Store, onForget: () -> Unit) {
         // A photo alone is a request too ("draw this"), so photos unlock the buttons like words do.
         // Both continue the open thread, or start one if the thread is empty; "Ask" wants words back.
         val ready = !busy && (prompt.isNotBlank() || photos.isNotEmpty())
-        fun send(ask: Boolean) {
-            if (d != null) run(fresh = false) { words, pics -> api.continueDrawing(d.id, words, pics, ask) }
-            else run(fresh = true) { words, pics -> api.newDrawing(words, pics, ask) }
-        }
+        fun send(ask: Boolean) = run(target = d, ask = ask)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { send(ask = true) }, enabled = ready, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Filled.QuestionAnswer, null); Spacer(Modifier.size(6.dp)); Text("Ask")

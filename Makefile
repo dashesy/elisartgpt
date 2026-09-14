@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke vm-check vm-config deploy downloads-on downloads-off vm-status emu emu-gui emu-install emu-stop
+.PHONY: help setup dev test lint fmt smoke apk publish code codes revoke vm-check vm-config deploy downloads-on downloads-off vm-status emu emu-gui emu-install emu-test emu-stop
 
 # Everything machine-specific (VM alias, paths, public URL) comes from .env.
 -include .env
@@ -101,6 +101,10 @@ emu-gui: ## Boot the emulator WITH a window, to look at the app yourself
 emu-install: apk ## Install the release APK on the emulator and launch it
 	$(ADB) -e install -r android/app/build/outputs/apk/release/elisart.apk
 	$(ADB) -e shell am start -n art.elisa/.MainActivity
+
+emu-test: ## Run the on-device tests (turn resilience) on the emulator; boots it if needed
+	@$(ADB) -e get-state >/dev/null 2>&1 || $(MAKE) emu
+	cd android && ./gradlew -q connectedDebugAndroidTest && echo "on-device tests passed"
 
 emu-stop: ## Shut the emulator down
 	-$(ADB) -e emu kill
